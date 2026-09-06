@@ -43,7 +43,6 @@ jobs:
       SANDWICH_EASYTIER_NETWORK_SECRET: ${{ secrets.SANDWICH_EASYTIER_NETWORK_SECRET }}
       SANDWICH_EASYTIER_PEERS: ${{ secrets.SANDWICH_EASYTIER_PEERS }}
       SANDWICH_DEFAULT_SERVER_URL: ${{ vars.SANDWICH_DEFAULT_SERVER_URL }}
-      SANDWICH_RELEASE_STORE_FILE: ${{ runner.temp }}/sandwich-release.jks
       SANDWICH_RELEASE_STORE_PASSWORD: ${{ secrets.SANDWICH_RELEASE_STORE_PASSWORD }}
       SANDWICH_RELEASE_KEY_ALIAS: ${{ secrets.SANDWICH_RELEASE_KEY_ALIAS }}
       SANDWICH_RELEASE_KEY_PASSWORD: ${{ secrets.SANDWICH_RELEASE_KEY_PASSWORD }}
@@ -72,6 +71,8 @@ jobs:
       - run: cargo install cargo-ndk --version 4.1.2 --locked
       - run: python -m venv server/.venv && server/.venv/bin/pip install -r server/requirements.txt
       - run: npm ci && npx playwright install --with-deps chromium
+      - name: Configure release paths
+        run: echo "SANDWICH_RELEASE_STORE_FILE=$RUNNER_TEMP/sandwich-release.jks" >> "$GITHUB_ENV"
       - name: Restore signing keystore
         env:
           SIGNING_STORE_BASE64: ${{ secrets.SANDWICH_RELEASE_STORE_BASE64 }}
