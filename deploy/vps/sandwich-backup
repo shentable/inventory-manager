@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+backup_dir=/var/backups/sandwich
+database=/var/lib/sandwich/app.db
+passphrase=/etc/sandwich/recovery-passphrase
+binary=/opt/sandwich/bin/sandwich-server
+timestamp=$(date -u +%Y%m%dT%H%M%SZ)
+temporary="$backup_dir/.sandwich-$timestamp.swinv.age.tmp"
+destination="$backup_dir/sandwich-$timestamp.swinv.age"
+
+"$binary" backup --db "$database" --output "$temporary" --passphrase-file "$passphrase"
+"$binary" inspect-backup --input "$temporary" --passphrase-file "$passphrase" >/dev/null
+mv "$temporary" "$destination"
+
+mapfile -t expired < <(find "$backup_dir" -maxdepth 1 -type f -name 'sandwich-*.swinv.age' -printf '%T@ %p\n' | sort -rn | tail -n +15 | cut -d' ' -f2-)
+if ((${#expired[@]})); then
+  rm -- "${expired[@]}"
+fi

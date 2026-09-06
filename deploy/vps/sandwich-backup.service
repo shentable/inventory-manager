@@ -1,0 +1,21 @@
+[Unit]
+Description=Encrypted backup of sandwich inventory
+Requires=sandwich.service
+After=sandwich.service
+
+[Service]
+Type=oneshot
+User=sandwich
+Group=sandwich
+ExecStart=/opt/sandwich/bin/sandwich-backup
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/etc/sandwich /var/lib/sandwich
+ReadWritePaths=/var/backups/sandwich
+MemoryHigh=384M
+MemoryMax=512M
+TasksMax=32

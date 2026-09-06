@@ -1,0 +1,12 @@
+飨拓™库存管理
+Copyright (C) 2026 飨拓™库存管理 contributors
+
+Except for the exclusions listed below, this project is licensed under the
+GNU Affero General Public License, version 3 only (AGPL-3.0-only). See LICENSE.
+
+The “飨拓™” name, the “飨拓™库存管理” product name, and the project logo are
+not licensed under the AGPL. Their permitted uses are described in
+TRADEMARKS.md.
+
+Third-party components remain under their respective licenses. See
+THIRD_PARTY_NOTICES.md and the LICENSES directory.

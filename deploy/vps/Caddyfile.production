@@ -1,0 +1,37 @@
+{
+	email admin@example.com
+}
+
+(sandwich_site) {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "same-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		Content-Security-Policy "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+		-Server
+	}
+	reverse_proxy 127.0.0.1:8000
+	log {
+		output file /var/log/caddy/sandwich-access.log {
+			roll_size 10MiB
+			roll_keep 5
+			roll_keep_for 168h
+		}
+		format json
+	}
+}
+
+staging.app.example.com {
+	import sandwich_site
+}
+
+app.example.com {
+	import sandwich_site
+}
+
+api.app.example.com {
+	import sandwich_site
+}

@@ -1,0 +1,75 @@
+# 飨拓™库存管理 — Docker Compose
+#
+# 服务：
+#   app      后端服务（FastAPI + SQLite + 内嵌 Web 前端），由 server/Dockerfile 构建
+#   easytier 可选组网 sidecar：默认不启动（profiles: [easytier]），需时显式指定 profile
+#
+# 环境变量（建议写入 .env，见 docs/DEPLOY.md）：
+#   SECRET_KEY             必填：Token 签名密钥，强随机字符串（后端 auth.py 读 SECRET_KEY）
+#   BOOTSTRAP_ADMIN_PIN     必填：仅空库创建 admin 使用的 4-6 位临时 PIN，首次登录强制修改
+#   EASYTIER_NETWORK_NAME  仅 easytier sidecar 需要：组网名称（自定义，如 my-sandwich-shop）
+#   EASYTIER_NETWORK_SECRET 仅 easytier sidecar 需要：组网密码（强随机字符串）
+#   EASYTIER_PEERS         仅 easytier sidecar 需要：可访问的受控初始节点
+#   EASYTIER_IPV4          可选：服务器在虚拟网中的固定 IP（默认 10.126.126.1）
+#
+# 常用命令：
+#   docker compose up -d --build                        # 仅启动后端
+#   docker compose --profile easytier up -d --build     # 后端 + EasyTier 组网 sidecar
+#   docker compose logs -f app                          # 查看后端日志
+#   docker compose down                                 # 停止（数据保留在 ./server/data）
+
+services:
+  app:
+    build:
+      # server/Dockerfile 要求构建上下文为仓库根目录（内部 COPY server/... 与 web/...）
+      context: .
+      dockerfile: server/Dockerfile
+    container_name: sandwich-app
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # 未设置 SECRET_KEY 时 compose 直接报错，避免默认密钥上线
+      SECRET_KEY: ${SECRET_KEY:?请在 .env 或 shell 环境变量中设置 SECRET_KEY}
+      # 仅空库必填；管理员首次改 PIN 后可从 .env 删除，已有库启动不再使用。
+      BOOTSTRAP_ADMIN_PIN: ${BOOTSTRAP_ADMIN_PIN:-}
+      APP_VERSION: ${APP_VERSION:-1.4.1-pilot-client-peer}
+    volumes:
+      # SQLite 持久化：容器内 /app/data/app.db（Dockerfile 中 mkdir /app/data）
+      # 宿主路径 ./server/data 与本地开发默认路径（server/data/app.db）保持一致
+      - ./server/data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  # 可选 EasyTier 组网 sidecar（profiles: [easytier]，默认不启动）：
+  #   docker compose --profile easytier up -d
+  # 与 app 共享网络命名空间（network_mode: service:app），EasyTier 虚拟网卡直接
+  # 进入 app 的命名空间；店员手机加入同名网络后即可访问
+  #   http://10.126.126.1:8000   （即 EASYTIER_IPV4:8000）
+  # EasyTier 无需注册账号：各节点网络名 + 密码一致即组成加密虚拟局域网。
+  easytier:
+    image: easytier/easytier:v2.6.4
+    container_name: sandwich-easytier
+    profiles: ["easytier"]
+    restart: unless-stopped
+    network_mode: service:app
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun
+    # 注意：easytier/easytier 镜像入口已是 easytier-core（tini -- easytier-core），
+    # command 只写参数。--peers 指定受控共享服务器用于节点发现/中继；
+    # --listeners 接受直连。
+    command: >
+      --hostname sandwich
+      --ipv4 ${EASYTIER_IPV4:-10.126.126.1}
+      --network-name ${EASYTIER_NETWORK_NAME:?请在 .env 设置 EASYTIER_NETWORK_NAME（组网名称）}
+      --network-secret ${EASYTIER_NETWORK_SECRET:?请在 .env 设置 EASYTIER_NETWORK_SECRET（组网密码）}
+      --peers ${EASYTIER_PEERS:?请在 .env 设置 EASYTIER_PEERS（例如 tcp://relay.example.com:11010）}
+      --listeners tcp://0.0.0.0:11010 udp://0.0.0.0:11010
+    depends_on:
+      - app

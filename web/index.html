@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+  <meta name="theme-color" content="#e07a3f">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="飨拓™库存管理">
+  <meta name="description" content="飨拓™库存管理">
+  <title>飨拓™库存管理</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="shantech-logo-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="shantech-logo-192.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <div id="view"></div>
+  </div>
+  <noscript style="display:block;padding:40px 20px;text-align:center;color:#8a7d6f;">
+    <p>请启用 JavaScript 以使用库存管理系统。</p>
+    <p>Please enable JavaScript to use the inventory management system.</p>
+  </noscript>
+  <script src="js/i18n.js"></script>
+  <script src="js/i18n/en-core.js"></script>
+  <script src="js/i18n/en-app.js"></script>
+  <script src="config.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () { navigator.serviceWorker.register('/sw.js'); });
+    }
+  </script>
+</body>
+</html>

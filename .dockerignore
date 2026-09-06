@@ -1,0 +1,24 @@
+# Docker 构建上下文过滤（构建上下文是仓库根目录，见 server/Dockerfile）
+# 排除与镜像无关的大目录 / 敏感文件，加快构建上下文传输
+
+.git
+**/.git
+.env
+.env.*
+server/.venv
+**/__pycache__
+**/*.pyc
+server/tests
+server/pytest.ini
+server/data
+android
+node_modules
+test-results
+playwright-report
+artifacts
+backups
+docs
+scripts
+package.json
+package-lock.json
+**/.DS_Store

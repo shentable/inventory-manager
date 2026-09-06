@@ -1,0 +1,186 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">飨拓™库存管理</string>
+
+    <!-- 通用对话框 -->
+    <string name="dialog_cancel">取消</string>
+
+    <!-- 启动 / 连接态 -->
+    <string name="toast_easytier_need_peer">请配置门店共用的 EasyTier 初始节点</string>
+    <string name="toast_offline_cache">数据未同步：当前仅可查看本机缓存</string>
+    <string name="connecting_verifying">正在验证门店服务器\n%1$s</string>
+    <string name="toast_foreign_store">检测到另一个门店数据库，已保持离线只读</string>
+    <string name="toast_blocked_external">已阻止跳转到非门店站点</string>
+    <string name="toast_cannot_connect">无法连接服务器，请检查地址与网络</string>
+
+    <!-- 角色选择页 -->
+    <string name="role_title">选择设备用途</string>
+    <string name="role_heading">这台手机用来做什么？</string>
+    <string name="role_description">同一个安装包既能连接门店，也能在专用手机上承载门店服务。请选择后再继续配置。</string>
+    <string name="role_client_button">作为客户端\n连接已有门店服务端</string>
+    <string name="role_server_button">作为店内服务端\n在这台手机上保存并提供门店数据</string>
+    <string name="role_server_warning">店内服务端应使用专用、常供电设备。任一时刻只能运行一个权威服务端。</string>
+
+    <!-- 配置页 -->
+    <string name="config_title_server">配置店内服务端</string>
+    <string name="config_title_client">配置客户端</string>
+    <string name="config_heading_server">店内服务端设置</string>
+    <string name="config_heading_client">客户端设置</string>
+    <string name="config_url_hint_text">请输入飨拓™库存管理的服务器地址，例如 %1$s。\n客户端启用 EasyTier 时可在这里填写公共中继 IP 或域名；App 会把它转换为 EasyTier 初始节点，业务仍通过虚拟地址 http://10.126.126.1:8000 访问。</string>
+    <string name="config_test_url_button">测试服务器 URL（直连）</string>
+    <string name="config_test_url_running">正在直连 %1$s/api/health …</string>
+    <string name="config_role_section">设备角色</string>
+    <string name="config_server_mode_switch">本机服务端模式（专用、常供电设备）</string>
+    <string name="config_hint_server_ip">服务端虚拟 IP</string>
+    <string name="config_hint_admin_pin">首次启用：临时管理员 PIN（4-6 位）</string>
+    <string name="config_hint_recovery">首次启用：恢复口令（至少 12 位）</string>
+    <string name="config_uninstall_warning">警告：卸载 App 会删除本机数据库；必须保持外部加密备份可用。</string>
+    <string name="config_save_button">保存并进入</string>
+    <string name="config_footer_hint">提示：修改地址请在右上角菜单「设置服务器地址」中进行。</string>
+
+    <!-- EasyTier 组网 -->
+    <string name="easytier_section_bundled">EasyTier 内嵌组网（可选）</string>
+    <string name="easytier_section_external">EasyTier 组网（此安装包未内置内核，需装 EasyTier App）</string>
+    <string name="easytier_enable_switch">启用内嵌组网（手机免装 EasyTier App）</string>
+    <string name="easytier_hint_network_name">网络名（店长提供）</string>
+    <string name="easytier_hint_secret">组网密码（店长提供）</string>
+    <string name="easytier_hint_peers">初始节点，例如 tcp://202.61.74.26:32147</string>
+    <string name="easytier_hint_public_port">EasyTier 公网端口（服务端与客户端一致）</string>
+    <string name="easytier_use_bundled_relay">使用内置公共中继配置</string>
+    <string name="toast_bundled_relay_loaded">已载入公共中继，保存前请先测试 EasyTier 全链路</string>
+    <string name="easytier_generate_peer">使用 URL 地址生成 EasyTier 初始节点</string>
+    <string name="toast_no_relay_in_url">URL 中没有可用的中继 IP、域名或端口</string>
+    <string name="toast_generated_peer">初始节点：%1$s</string>
+    <string name="easytier_test_button">测试 EasyTier 全链路</string>
+    <string name="easytier_test_running">正在临时组网并请求 %1$s/api/health …</string>
+    <string name="easytier_recommended_peers">推荐初始节点：tcp://&lt;公共中继IP&gt;:32147。服务手机和客户端都主动连接中继，不依赖店内 IPv6 入站。</string>
+    <string name="toast_server_requires_easytier">本机服务端必须启用 EasyTier 组网</string>
+    <string name="toast_config_incomplete">组网参数不完整，请检查</string>
+    <string name="easytier_err_name_empty">网络名不能为空</string>
+    <string name="easytier_err_secret_empty">组网密码不能为空</string>
+    <string name="easytier_err_no_peers">至少配置一个可访问的 EasyTier 初始节点</string>
+    <string name="easytier_err_peer_format">初始节点格式不正确，应类似 tcp://relay.example.com:11010</string>
+    <string name="easytier_err_virtual_ip">服务端虚拟 IP 格式不正确</string>
+    <string name="easytier_err_port_range">EasyTier 公网监听端口必须在 1024-65535</string>
+    <string name="easytier_port_invalid">EasyTier 公网端口必须在 1024-65535</string>
+
+    <!-- EasyTier 伴生 App 引导对话框 -->
+    <string name="easytier_dialog_title">需要组网</string>
+    <string name="easytier_dialog_message">门店服务器通过 EasyTier 组网访问。\n此安装包未内置组网内核，需安装 EasyTier App 并填入店长提供的网络名与密码。</string>
+    <string name="easytier_dialog_download">去下载</string>
+    <string name="easytier_dialog_later">以后再说</string>
+
+    <!-- Cloudflare DDNS / 公网 HTTPS -->
+    <string name="ddns_section_title">公网域名（Cloudflare DDNS）</string>
+    <string name="ddns_enable_switch">将店内 Wi-Fi 公网 IPv6 自动更新到 Cloudflare</string>
+    <string name="ddns_hint_hostname">完整域名，例如 inventory.example.com</string>
+    <string name="ddns_hint_zone_id">Cloudflare Zone ID（32 位）</string>
+    <string name="ddns_hint_token_saved">API Token 已安全保存；留空不修改</string>
+    <string name="ddns_hint_token_input">一次性输入 Cloudflare API Token</string>
+    <string name="ddns_proxied_switch">启用 Cloudflare 橙云（EasyTier 初始节点必须关闭）</string>
+    <string name="ddns_hint_https_port">公网 HTTPS 端口</string>
+    <string name="tls_hint_cert_saved">Origin Certificate 已安全保存；留空不修改</string>
+    <string name="tls_hint_cert_input">一次性粘贴 Cloudflare Origin Certificate PEM</string>
+    <string name="tls_hint_key_saved">Origin Private Key 已安全保存；留空不修改</string>
+    <string name="tls_hint_key_input">一次性粘贴 Cloudflare Origin Private Key PEM</string>
+    <string name="tls_status_configured">公网 HTTPS：已配置</string>
+    <string name="tls_status_missing">公网 HTTPS：未配置 Origin CA 证书</string>
+    <string name="tls_error_pair_required">Origin Certificate 和 Private Key 必须同时填写</string>
+    <string name="tls_error_save_failed">Origin 证书保存失败</string>
+    <string name="ddns_status_format">状态：%1$s</string>
+    <string name="ddns_status_checking">正在检测 Wi-Fi 公网 IPv6 并同步…</string>
+    <string name="ddns_status_never">尚未同步</string>
+    <string name="ddns_status_minutes_ago">%1$d 分钟前</string>
+    <string name="ddns_test_button">立即测试并同步</string>
+    <string name="ddns_security_note">Token、Origin Private Key 仅需输入一次，保存后不可查看。Cloudflare SSL/TLS 模式必须设为 Full (strict)。</string>
+
+    <!-- Cloudflare 校验与同步结果 -->
+    <string name="cf_err_zone_id">Cloudflare Zone ID 应为 32 位十六进制字符</string>
+    <string name="cf_err_hostname">请输入完整域名，例如 inventory.example.com</string>
+    <string name="cf_err_proxy_port">Cloudflare 代理 HTTPS 端口只能选择 %1$s</string>
+    <string name="cf_err_https_port_range">公网 HTTPS 端口必须在 1024-65535</string>
+    <string name="cf_err_token_required">请输入 Cloudflare API Token</string>
+    <string name="cf_not_enabled">Cloudflare DDNS 未启用</string>
+    <string name="cf_no_public_ipv6">未检测到店内 Wi-Fi 的公网 IPv6（2000::/3）</string>
+    <string name="cf_duplicate_records">Cloudflare 中存在多个同名 AAAA 记录，请先保留一个</string>
+    <string name="cf_already_latest">Cloudflare AAAA 已是最新</string>
+    <string name="cf_update_success">Cloudflare AAAA 更新成功</string>
+    <string name="cf_sync_failed">Cloudflare 同步失败：%1$s</string>
+    <string name="cf_http_error">Cloudflare 返回 HTTP %1$d</string>
+    <string name="cf_error_prefix">Cloudflare：%1$s</string>
+    <string name="cf_request_failed">请求失败</string>
+    <string name="cf_invalid_response">Cloudflare API 返回无效结果</string>
+
+    <!-- 菜单与保存 -->
+    <string name="menu_refresh">刷新</string>
+    <string name="menu_settings">设置服务器地址</string>
+    <string name="menu_backup">服务端备份</string>
+    <string name="menu_restore">从加密备份恢复</string>
+    <string name="toast_url_required">请输入服务器地址</string>
+    <string name="toast_saved_url">已保存：%1$s</string>
+
+    <!-- 停止服务端 / 恢复对话框 -->
+    <string name="dialog_stop_server_title">停止本机服务端？</string>
+    <string name="dialog_stop_server_message">本机数据库会保留，但所有客户端必须停止写入并改连新的唯一服务端。确认最近备份已完成。</string>
+    <string name="dialog_confirm_switch">确认切换</string>
+    <string name="toast_backup_required_first">离开服务端模式前必须先完成一次最新外部备份</string>
+    <string name="dialog_restore_title">恢复并覆盖本机数据库？</string>
+    <string name="dialog_restore_message">服务会停止；备份将校验、迁移并撤销全部旧登录。此操作不能合并当前数据。</string>
+    <string name="dialog_confirm_restore">确认恢复</string>
+
+    <!-- 连接错误页 -->
+    <string name="error_title_cannot_connect">无法连接门店服务器</string>
+    <string name="peers_not_configured">未配置</string>
+    <string name="error_detail_format">%1$s\n%2$s\nEasyTier 初始节点：%3$s</string>
+    <string name="error_retry">重试</string>
+    <string name="error_check_settings">检查设置</string>
+
+    <!-- 前台服务通知 -->
+    <string name="notify_channel_name">门店节点</string>
+    <string name="notify_state_available">可用</string>
+    <string name="notify_state_available_detail">后端与组网健康</string>
+    <string name="notify_state_conflict">地址冲突</string>
+    <string name="notify_state_conflict_detail">检测到 %1$s 已有权威服务端，本机拒绝启动</string>
+    <string name="notify_state_starting">后端启动中</string>
+    <string name="notify_starting_public_tls">正在启动本机后端与公网 HTTPS</string>
+    <string name="notify_starting_backend">正在启动本机库存后端</string>
+    <string name="notify_state_connecting">组网中</string>
+    <string name="notify_connecting_detail">正在连接门店服务端</string>
+    <string name="notify_running_full">本机后端、组网与公网 HTTPS 运行中</string>
+    <string name="notify_running_server">本机后端与组网进程运行中</string>
+    <string name="notify_running_client">门店库存服务可访问</string>
+    <string name="notify_backup_failed">备份故障</string>
+    <string name="notify_ddns_failed">域名同步故障</string>
+
+    <!-- 健康探测 -->
+    <string name="probe_server_returned_code">服务器返回 %1$d</string>
+    <string name="probe_health_missing_fields">健康接口缺少有效的 status/store_id</string>
+    <string name="probe_timeout">连接超时</string>
+
+    <!-- 连接测试 -->
+    <string name="test_direct_success">直连成功 · %1$s · store_id %2$s</string>
+    <string name="test_direct_failed">直连失败：%1$s</string>
+    <string name="test_process_running">仍在运行</string>
+    <string name="test_process_exited">已退出(%1$d)</string>
+    <string name="test_socks_failed">EasyTier 内核未建立本地 SOCKS5，进程%1$s</string>
+    <string name="test_store_unreachable">门店服务不可达</string>
+    <string name="test_easytier_success">EasyTier 全链路成功 · store_id %1$s</string>
+    <string name="test_socks_up_store_down">SOCKS5 已启动，但门店服务不可达：%1$s</string>
+    <string name="test_easytier_failed">EasyTier 测试失败：%1$s</string>
+
+    <!-- 备份与恢复 -->
+    <string name="backup_no_directory">尚未选择外部备份目录</string>
+    <string name="backup_no_passphrase">尚未设置恢复口令</string>
+    <string name="backup_dir_permission_lost">备份目录权限已失效</string>
+    <string name="backup_create_failed">无法创建外部备份</string>
+    <string name="backup_done_to">已备份到 %1$s</string>
+    <string name="backup_failed">备份失败</string>
+    <string name="restore_done">恢复完成，旧登录已撤销</string>
+    <string name="restore_failed">恢复失败</string>
+
+    <!-- 本机服务端初始化 -->
+    <string name="server_pin_invalid">临时管理员 PIN 必须为 4-6 位数字</string>
+    <string name="server_recovery_too_short">恢复口令至少 12 位</string>
+    <string name="tls_cert_invalid_pem">Cloudflare Origin Certificate 不是有效 PEM</string>
+    <string name="tls_key_invalid_pem">Cloudflare Origin Private Key 不是有效 PEM</string>
+</resources>

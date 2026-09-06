@@ -1,0 +1,46 @@
+# Local secrets and environment
+.env
+.dev.vars
+cloudflare/.dev.vars
+.wrangler/
+cloudflare/.wrangler/
+.env.*
+!.env.example
+*.jks
+*.keystore
+
+# Runtime data and backups
+server/data/
+backups/
+artifacts/
+dist/
+*.db
+*.db-wal
+*.db-shm
+*.swinv.age
+*.pass
+*.secret
+
+# Python
+server/.venv/
+**/__pycache__/
+**/.pytest_cache/
+*.py[cod]
+
+# Android / IDE / native build products
+android/.gradle/
+android/local.properties
+android/.idea/
+android/**/build/
+android/easytier/.easytier-src/
+android/easytier/build-metadata.txt
+android/native-server/build-metadata.txt
+android/app/src/main/jniLibs/**/*.so
+native-server/target/
+
+# OS/editor
+.DS_Store
+*.iml
+node_modules/
+test-results/
+playwright-report/

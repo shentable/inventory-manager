@@ -1,0 +1,17 @@
+# Gradle / IDE / 构建产物
+*.iml
+.gradle/
+/local.properties
+.idea/
+.DS_Store
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+app/build/
+
+# 第三方 AAR（如未来引入）不纳入版本库
+app/libs/*.aar
+
+# 内嵌 easytier-core 可执行文件（体积大、可由 build-core.sh 复现），不纳入版本库
+app/src/main/jniLibs/**/*.so

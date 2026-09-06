@@ -1,0 +1,186 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Shantech™ Inventory Management</string>
+
+    <!-- Common dialogs -->
+    <string name="dialog_cancel">Cancel</string>
+
+    <!-- Startup / connectivity -->
+    <string name="toast_easytier_need_peer">Please configure the store\'s shared EasyTier initial peer</string>
+    <string name="toast_offline_cache">Data not synced: only the local cache can be viewed</string>
+    <string name="connecting_verifying">Verifying the store server\n%1$s</string>
+    <string name="toast_foreign_store">Another store database detected; staying offline and read-only</string>
+    <string name="toast_blocked_external">Blocked navigation to a non-store site</string>
+    <string name="toast_cannot_connect">Cannot connect to the server; check the address and network</string>
+
+    <!-- Role choice page -->
+    <string name="role_title">Choose device role</string>
+    <string name="role_heading">What is this phone for?</string>
+    <string name="role_description">One package can either connect to a store or host the store service on a dedicated phone. Choose a role before continuing.</string>
+    <string name="role_client_button">Use as client\nConnect to an existing store server</string>
+    <string name="role_server_button">Use as in-store server\nStore and serve store data on this phone</string>
+    <string name="role_server_warning">The in-store server should run on a dedicated, always-powered device. Only one authoritative server may run at a time.</string>
+
+    <!-- Config page -->
+    <string name="config_title_server">Configure in-store server</string>
+    <string name="config_title_client">Configure client</string>
+    <string name="config_heading_server">In-store server settings</string>
+    <string name="config_heading_client">Client settings</string>
+    <string name="config_url_hint_text">Enter the Shantech™ Inventory Management server address, e.g. %1$s.\nWith EasyTier enabled, a client may enter a public relay IP or domain here; the app converts it into an EasyTier initial peer, while traffic still uses the virtual address http://10.126.126.1:8000.</string>
+    <string name="config_test_url_button">Test server URL (direct)</string>
+    <string name="config_test_url_running">Connecting directly to %1$s/api/health …</string>
+    <string name="config_role_section">Device role</string>
+    <string name="config_server_mode_switch">Local server mode (dedicated, always-powered device)</string>
+    <string name="config_hint_server_ip">Server virtual IP</string>
+    <string name="config_hint_admin_pin">First setup: temporary admin PIN (4-6 digits)</string>
+    <string name="config_hint_recovery">First setup: recovery passphrase (at least 12 characters)</string>
+    <string name="config_uninstall_warning">Warning: uninstalling the app deletes the local database; an external encrypted backup must remain available.</string>
+    <string name="config_save_button">Save and continue</string>
+    <string name="config_footer_hint">Tip: change the address via \'Server address\' in the top-right menu.</string>
+
+    <!-- EasyTier networking -->
+    <string name="easytier_section_bundled">EasyTier embedded networking (optional)</string>
+    <string name="easytier_section_external">EasyTier networking (this package has no built-in core; the EasyTier app is required)</string>
+    <string name="easytier_enable_switch">Enable embedded networking (no EasyTier app needed on this phone)</string>
+    <string name="easytier_hint_network_name">Network name (provided by the manager)</string>
+    <string name="easytier_hint_secret">Network secret (provided by the manager)</string>
+    <string name="easytier_hint_peers">Initial peers, e.g. tcp://202.61.74.26:32147</string>
+    <string name="easytier_hint_public_port">EasyTier public port (same on server and clients)</string>
+    <string name="easytier_use_bundled_relay">Use built-in public relay config</string>
+    <string name="toast_bundled_relay_loaded">Public relay loaded; test the full EasyTier path before saving</string>
+    <string name="easytier_generate_peer">Generate EasyTier initial peer from the URL</string>
+    <string name="toast_no_relay_in_url">No usable relay IP, domain or port in the URL</string>
+    <string name="toast_generated_peer">Initial peer: %1$s</string>
+    <string name="easytier_test_button">Test EasyTier end-to-end</string>
+    <string name="easytier_test_running">Temporarily joining the network and requesting %1$s/api/health …</string>
+    <string name="easytier_recommended_peers">Recommended initial peer: tcp://&lt;public relay IP&gt;:32147. Both the server phone and clients dial out to the relay, without relying on inbound in-store IPv6.</string>
+    <string name="toast_server_requires_easytier">The local server requires EasyTier networking</string>
+    <string name="toast_config_incomplete">Networking parameters are incomplete; please check</string>
+    <string name="easytier_err_name_empty">Network name is required</string>
+    <string name="easytier_err_secret_empty">Network secret is required</string>
+    <string name="easytier_err_no_peers">Configure at least one reachable EasyTier initial peer</string>
+    <string name="easytier_err_peer_format">Invalid initial peer format; expected something like tcp://relay.example.com:11010</string>
+    <string name="easytier_err_virtual_ip">Invalid server virtual IP format</string>
+    <string name="easytier_err_port_range">EasyTier public listen port must be within 1024-65535</string>
+    <string name="easytier_port_invalid">EasyTier public port must be within 1024-65535</string>
+
+    <!-- EasyTier companion app prompt dialog -->
+    <string name="easytier_dialog_title">Networking required</string>
+    <string name="easytier_dialog_message">The store server is reached over an EasyTier network.\nThis package has no built-in networking core; install the EasyTier app and enter the network name and secret provided by the manager.</string>
+    <string name="easytier_dialog_download">Download</string>
+    <string name="easytier_dialog_later">Later</string>
+
+    <!-- Cloudflare DDNS / public HTTPS -->
+    <string name="ddns_section_title">Public domain (Cloudflare DDNS)</string>
+    <string name="ddns_enable_switch">Automatically update the store Wi-Fi public IPv6 to Cloudflare</string>
+    <string name="ddns_hint_hostname">Full hostname, e.g. inventory.example.com</string>
+    <string name="ddns_hint_zone_id">Cloudflare Zone ID (32 characters)</string>
+    <string name="ddns_hint_token_saved">API token securely saved; leave blank to keep it unchanged</string>
+    <string name="ddns_hint_token_input">Enter the Cloudflare API token once</string>
+    <string name="ddns_proxied_switch">Enable Cloudflare orange cloud (EasyTier initial peer must be off)</string>
+    <string name="ddns_hint_https_port">Public HTTPS port</string>
+    <string name="tls_hint_cert_saved">Origin certificate securely saved; leave blank to keep it unchanged</string>
+    <string name="tls_hint_cert_input">Paste the Cloudflare Origin Certificate PEM once</string>
+    <string name="tls_hint_key_saved">Origin private key securely saved; leave blank to keep it unchanged</string>
+    <string name="tls_hint_key_input">Paste the Cloudflare Origin Private Key PEM once</string>
+    <string name="tls_status_configured">Public HTTPS: configured</string>
+    <string name="tls_status_missing">Public HTTPS: no Origin CA certificate configured</string>
+    <string name="tls_error_pair_required">Origin certificate and private key must be entered together</string>
+    <string name="tls_error_save_failed">Failed to save the Origin certificate</string>
+    <string name="ddns_status_format">Status: %1$s</string>
+    <string name="ddns_status_checking">Detecting the Wi-Fi public IPv6 and syncing…</string>
+    <string name="ddns_status_never">Never synced</string>
+    <string name="ddns_status_minutes_ago">%1$d min ago</string>
+    <string name="ddns_test_button">Test and sync now</string>
+    <string name="ddns_security_note">The token and Origin private key only need to be entered once and cannot be viewed after saving. Cloudflare SSL/TLS mode must be set to Full (strict).</string>
+
+    <!-- Cloudflare validation and sync results -->
+    <string name="cf_err_zone_id">Cloudflare Zone ID must be 32 hexadecimal characters</string>
+    <string name="cf_err_hostname">Enter a full hostname, e.g. inventory.example.com</string>
+    <string name="cf_err_proxy_port">Cloudflare proxied HTTPS port must be one of %1$s</string>
+    <string name="cf_err_https_port_range">Public HTTPS port must be within 1024-65535</string>
+    <string name="cf_err_token_required">Enter the Cloudflare API token</string>
+    <string name="cf_not_enabled">Cloudflare DDNS is not enabled</string>
+    <string name="cf_no_public_ipv6">No public IPv6 (2000::/3) detected on the store Wi-Fi</string>
+    <string name="cf_duplicate_records">Multiple AAAA records with the same name exist in Cloudflare; keep only one first</string>
+    <string name="cf_already_latest">Cloudflare AAAA record is already up to date</string>
+    <string name="cf_update_success">Cloudflare AAAA record updated</string>
+    <string name="cf_sync_failed">Cloudflare sync failed: %1$s</string>
+    <string name="cf_http_error">Cloudflare returned HTTP %1$d</string>
+    <string name="cf_error_prefix">Cloudflare: %1$s</string>
+    <string name="cf_request_failed">Request failed</string>
+    <string name="cf_invalid_response">Cloudflare API returned an invalid result</string>
+
+    <!-- Menu and saving -->
+    <string name="menu_refresh">Refresh</string>
+    <string name="menu_settings">Server address</string>
+    <string name="menu_backup">Server backup</string>
+    <string name="menu_restore">Restore from encrypted backup</string>
+    <string name="toast_url_required">Enter the server address</string>
+    <string name="toast_saved_url">Saved: %1$s</string>
+
+    <!-- Stop server / restore dialogs -->
+    <string name="dialog_stop_server_title">Stop the local server?</string>
+    <string name="dialog_stop_server_message">The local database is kept, but all clients must stop writing and switch to the new single server. Confirm a recent backup has completed.</string>
+    <string name="dialog_confirm_switch">Confirm switch</string>
+    <string name="toast_backup_required_first">A fresh external backup must be completed before leaving server mode</string>
+    <string name="dialog_restore_title">Restore and overwrite the local database?</string>
+    <string name="dialog_restore_message">The service will stop; the backup is verified, migrated, and all old logins are revoked. This operation cannot merge current data.</string>
+    <string name="dialog_confirm_restore">Confirm restore</string>
+
+    <!-- Connection error page -->
+    <string name="error_title_cannot_connect">Cannot reach the store server</string>
+    <string name="peers_not_configured">Not configured</string>
+    <string name="error_detail_format">%1$s\n%2$s\nEasyTier initial peers: %3$s</string>
+    <string name="error_retry">Retry</string>
+    <string name="error_check_settings">Check settings</string>
+
+    <!-- Foreground service notifications -->
+    <string name="notify_channel_name">Store node</string>
+    <string name="notify_state_available">Available</string>
+    <string name="notify_state_available_detail">Backend and networking healthy</string>
+    <string name="notify_state_conflict">Address conflict</string>
+    <string name="notify_state_conflict_detail">An authoritative server already exists at %1$s; this device refuses to start</string>
+    <string name="notify_state_starting">Starting backend</string>
+    <string name="notify_starting_public_tls">Starting the local backend and public HTTPS</string>
+    <string name="notify_starting_backend">Starting the local inventory backend</string>
+    <string name="notify_state_connecting">Joining network</string>
+    <string name="notify_connecting_detail">Connecting to the store server</string>
+    <string name="notify_running_full">Local backend, networking and public HTTPS running</string>
+    <string name="notify_running_server">Local backend and networking processes running</string>
+    <string name="notify_running_client">Store inventory service reachable</string>
+    <string name="notify_backup_failed">Backup failure</string>
+    <string name="notify_ddns_failed">Domain sync failure</string>
+
+    <!-- Health probe -->
+    <string name="probe_server_returned_code">Server returned %1$d</string>
+    <string name="probe_health_missing_fields">Health endpoint lacks a valid status/store_id</string>
+    <string name="probe_timeout">Connection timed out</string>
+
+    <!-- Connection tests -->
+    <string name="test_direct_success">Direct connection OK · %1$s · store_id %2$s</string>
+    <string name="test_direct_failed">Direct connection failed: %1$s</string>
+    <string name="test_process_running">still running</string>
+    <string name="test_process_exited">exited(%1$d)</string>
+    <string name="test_socks_failed">EasyTier core did not open local SOCKS5; process %1$s</string>
+    <string name="test_store_unreachable">Store service unreachable</string>
+    <string name="test_easytier_success">EasyTier end-to-end OK · store_id %1$s</string>
+    <string name="test_socks_up_store_down">SOCKS5 is up, but the store service is unreachable: %1$s</string>
+    <string name="test_easytier_failed">EasyTier test failed: %1$s</string>
+
+    <!-- Backup and restore -->
+    <string name="backup_no_directory">No external backup folder selected yet</string>
+    <string name="backup_no_passphrase">Recovery passphrase not set yet</string>
+    <string name="backup_dir_permission_lost">Backup folder permission has expired</string>
+    <string name="backup_create_failed">Cannot create the external backup</string>
+    <string name="backup_done_to">Backed up to %1$s</string>
+    <string name="backup_failed">Backup failed</string>
+    <string name="restore_done">Restore complete; old logins revoked</string>
+    <string name="restore_failed">Restore failed</string>
+
+    <!-- Local server initialization -->
+    <string name="server_pin_invalid">Temporary admin PIN must be 4-6 digits</string>
+    <string name="server_recovery_too_short">Recovery passphrase must be at least 12 characters</string>
+    <string name="tls_cert_invalid_pem">Cloudflare Origin Certificate is not a valid PEM</string>
+    <string name="tls_key_invalid_pem">Cloudflare Origin Private Key is not a valid PEM</string>
+</resources>

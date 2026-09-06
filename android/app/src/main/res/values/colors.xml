@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 主题色：新鲜绿叶绿 -->
+    <color name="primary">#2E7D32</color>
+    <color name="primary_dark">#1B5E20</color>
+    <color name="accent">#FFB300</color>
+
+    <!-- 自适应图标背景 -->
+    <color name="ic_launcher_background">#F5F1EA</color>
+</resources>

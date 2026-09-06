@@ -1,0 +1,26 @@
+{
+  "name": "飨拓™库存管理",
+  "short_name": "飨拓™库存",
+  "description": "飨拓™库存管理（盘点、报损、效期、采购）",
+  "lang": "zh-CN",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f5f1ea",
+  "theme_color": "#e07a3f",
+  "icons": [
+    {
+      "src": "shantech-logo-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "shantech-logo-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

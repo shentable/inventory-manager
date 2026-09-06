@@ -1,0 +1,36 @@
+[Unit]
+Description=Sandwich inventory native server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sandwich
+Group=sandwich
+WorkingDirectory=/var/lib/sandwich
+ExecStart=/opt/sandwich/bin/sandwich-server serve --db /var/lib/sandwich/app.db --secret-file /etc/sandwich/token-secret --listen 127.0.0.1:8000 --backend-kind linux_native --app-version 1.15.1-vps-login-layout
+Restart=on-failure
+RestartSec=3s
+TimeoutStopSec=30s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadOnlyPaths=/etc/sandwich
+ReadWritePaths=/var/lib/sandwich
+MemoryHigh=320M
+MemoryMax=384M
+TasksMax=128
+
+[Install]
+WantedBy=multi-user.target

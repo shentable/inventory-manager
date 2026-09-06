@@ -1,0 +1,2 @@
+TOKEN_SECRET="replace-with-at-least-32-random-characters"
+BOOTSTRAP_ADMIN_PIN="replace-with-4-to-6-digits"

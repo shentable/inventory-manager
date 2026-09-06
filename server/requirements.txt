@@ -1,0 +1,37 @@
+# 飨拓™库存管理 — 依赖（全部 == 钉死，保证 Docker 镜像可复现）
+# 版本与 server/.venv 中验证通过的版本一致
+
+# ---- 运行时依赖 ----
+fastapi==0.141.1
+uvicorn==0.52.4
+uvloop==0.22.1            # uvicorn[standard]
+httptools==0.8.0          # uvicorn[standard]
+python-dotenv==1.2.3      # uvicorn[standard]
+PyYAML==6.0.3             # uvicorn[standard]
+websockets==17.1          # uvicorn[standard]
+watchfiles==1.2.0         # uvicorn[standard]
+sqlalchemy==2.0.52
+alembic==1.16.5
+Mako==1.4.1
+MarkupSafe==3.0.3
+pydantic==2.13.5
+pydantic-core==2.46.5     # pydantic 强制依赖
+starlette==1.6.0
+anyio==4.14.2
+annotated-types==0.8.0
+annotated-doc==0.0.5
+typing-extensions==4.16.0
+typing-inspection==0.4.4
+click==8.5.0
+h11==0.16.0
+idna==3.19
+certifi==2026.7.22
+
+# ---- 测试依赖 ----
+pytest==9.1.1
+httpx==0.28.1
+httpcore==1.0.9
+iniconfig==2.3.0
+packaging==26.3
+pluggy==1.6.0
+Pygments==2.21.0
