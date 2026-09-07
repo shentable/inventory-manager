@@ -211,6 +211,22 @@
     return chip;
   }
 
+  function copyrightFooter() {
+    return h('footer', { class: 'legal-footer' },
+      h('span', {}, I18N.t('© 2026 飨拓™库存管理贡献者')),
+      h('span', { 'aria-hidden': 'true' }, ' · '),
+      h('a', {
+        class: 'source-link',
+        href: 'https://github.com/shentable/inventory-manager',
+        target: '_blank',
+        rel: 'noopener noreferrer'
+      },
+      h('img', { src: '/github-mark.svg', alt: '', 'aria-hidden': 'true' }),
+      I18N.t('源代码')),
+      h('span', { 'aria-hidden': 'true' }, ' · AGPL-3.0')
+    );
+  }
+
   /* ================= 登录页 ================= */
   function renderLogin() {
     var root = h('div', { class: 'page login-page' },
@@ -225,6 +241,10 @@
     );
     var listWrap = h('div', { class: 'login-users' });
     root.appendChild(listWrap);
+    root.appendChild(h('div', { class: 'login-footer-wrap' },
+      h('div', { class: 'login-foot' }, I18N.t('店员系统 · 服务由店内网络提供')),
+      copyrightFooter()
+    ));
 
     return API.loginOptions().then(function (data) {
       var users = (data && data.users) || [];
@@ -244,7 +264,6 @@
         });
         listWrap.appendChild(card);
       });
-      root.appendChild(h('div', { class: 'login-foot' }, I18N.t('店员系统 · 服务由店内网络提供')));
       return { root: root };
     }).catch(function (err) {
       listWrap.appendChild(window.UI.errorView((err && err.message) || I18N.t('加载失败'), renderRoute));
@@ -392,16 +411,7 @@
     });
     root.appendChild(h('div', { class: 'sec-title' }, I18N.t('功能')));
     root.appendChild(grid);
-    root.appendChild(h('footer', { class: 'home-footer' },
-      h('span', {}, I18N.t('© 2026 飨拓™库存管理贡献者')),
-      h('span', { 'aria-hidden': 'true' }, ' · '),
-      h('a', {
-        href: 'https://github.com/shentable/inventory-manager',
-        target: '_blank',
-        rel: 'noopener noreferrer'
-      }, I18N.t('源代码')),
-      h('span', { 'aria-hidden': 'true' }, ' · AGPL-3.0')
-    ));
+    root.appendChild(copyrightFooter());
 
     // 拉取 dashboard 数据（失败不阻塞页面）
     API.dashboard().then(function (d) {

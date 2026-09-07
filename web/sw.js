@@ -1,9 +1,9 @@
-const SHELL_CACHE = 'sandwich-shell-v26';
+const SHELL_CACHE = 'sandwich-shell-v27';
 const SHELL = [
   '/', '/index.html', '/config.js', '/styles.css', '/app.js',
   '/js/i18n.js', '/js/i18n/en-core.js', '/js/i18n/en-app.js',
   '/js/api.js', '/js/ui.js', '/manifest.json',
-  '/shantech-logo-192.png', '/shantech-logo-512.png'
+  '/shantech-logo-192.png', '/shantech-logo-512.png', '/github-mark.svg'
 ];
 
 self.addEventListener('install', function (event) {

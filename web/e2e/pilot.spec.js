@@ -31,6 +31,9 @@ test.describe.serial('门店试运行浏览器流程', () => {
     await expect(page.locator('.login-title')).toHaveText('Shantech™ Inventory Management');
     await expect(page.locator('.login-sub')).toHaveText('Choose an account · enter PIN to log in');
     await expect(page.getByRole('button', { name: 'Choose language' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Source code' })).toHaveAttribute('href', 'https://github.com/shentable/inventory-manager');
+    await expect(page.locator('.legal-footer .source-link img')).toHaveAttribute('src', '/github-mark.svg');
+    await expect(page.locator('.legal-footer')).toContainText('© 2026 Shantech™ Inventory Management contributors · Source code · AGPL-3.0');
 
     await page.locator('.user-card', { hasText: '@staff · Staff' }).click();
     await expect(page.locator('.pin-card .dialog-msg')).toHaveText('Enter PIN (4-6 digits)');
