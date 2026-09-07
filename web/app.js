@@ -36,7 +36,7 @@
   })();
 
   var ROLE_LABEL = { staff: I18N.t('店员'), manager: I18N.t('店长'), admin: I18N.t('管理员') };
-  var SOURCE_LABEL = { purchase: I18N.t('采购'), init: I18N.t('初始'), adjust: I18N.t('调整') };
+  var SOURCE_LABEL = { purchase: I18N.t('采购'), receive: I18N.t('直接入库'), init: I18N.t('初始'), adjust: I18N.t('调整') };
 
   /* ---------- 工具 ---------- */
   function fmtDate(d) {
@@ -375,6 +375,7 @@
     feats.push({ icon: '📦', label: I18N.t('库存查询'), desc: I18N.t('总览与批次'), to: '#/stock' });
     if (canReview) { feats.push({ icon: '✅', label: I18N.t('盘点管理'), desc: I18N.t('待比对 · 记录 · 结果'), to: '#/count-review' }); }
     if (canReview) { feats.push({ icon: '✔️', label: I18N.t('确认报损'), desc: I18N.t('处理报损'), to: '#/waste-review' }); }
+    if (canReview) { feats.push({ icon: '📥', label: I18N.t('入库'), desc: I18N.t('直接增加库存批次'), to: '#/receive' }); }
     if (canReview) { feats.push({ icon: '🛒', label: I18N.t('采购'), desc: I18N.t('下单与入库'), to: '#/purchase' }); }
     if (canReview) { feats.push({ icon: '🏷️', label: I18N.t('库存品管理'), desc: I18N.t('商品资料'), to: '#/items' }); }
     if (role === 'admin') { feats.push({ icon: '👥', label: I18N.t('用户管理'), desc: I18N.t('账号、身份与 PIN'), to: '#/users' }); }
@@ -391,6 +392,16 @@
     });
     root.appendChild(h('div', { class: 'sec-title' }, I18N.t('功能')));
     root.appendChild(grid);
+    root.appendChild(h('footer', { class: 'home-footer' },
+      h('span', {}, I18N.t('© 2026 飨拓™库存管理贡献者')),
+      h('span', { 'aria-hidden': 'true' }, ' · '),
+      h('a', {
+        href: 'https://github.com/shentable/inventory-manager',
+        target: '_blank',
+        rel: 'noopener noreferrer'
+      }, I18N.t('源代码')),
+      h('span', { 'aria-hidden': 'true' }, ' · AGPL-3.0')
+    ));
 
     // 拉取 dashboard 数据（失败不阻塞页面）
     API.dashboard().then(function (d) {
@@ -1975,6 +1986,198 @@
     return { root: root };
   }
 
+  /* ================= 直接入库（店长/管理员） ================= */
+  function renderStockReceive() {
+    var root = h('div', { class: 'page purchase-page' });
+    var content = h('div', { class: 'purchase-content' });
+    var quantities = {};
+    root.appendChild(content);
+
+    function datePlus(days) {
+      var base = new Date();
+      base.setHours(0, 0, 0, 0);
+      return fmtDate(new Date(base.getTime() + days * 86400000));
+    }
+
+    function renderExpiry(selected, allItems) {
+      content.innerHTML = '';
+      setBar(root, null);
+      var back = h('button', { class: 'btn btn-ghost btn-sm' }, '← ' + I18N.t('返回'));
+      back.addEventListener('click', function () { renderSelect(allItems); });
+      content.appendChild(h('div', { class: 'recv-head' },
+        back,
+        h('div', { class: 'recv-title' }, I18N.t('填写入库效期'))
+      ));
+
+      var expiryState = {};
+      var listWrap = h('div', { class: 'recv-list' });
+      selected.forEach(function (it) {
+        var shelf = Number(it.shelf_life_days || 7);
+        if (!(shelf >= 1)) { shelf = 7; }
+        expiryState[it.id] = datePlus(shelf);
+        var card = h('div', { class: 'recv-card' });
+        card.appendChild(h('div', { class: 'recv-name' },
+          I18N.t('{name}（入 {qty} {unit}）', { name: it.name, qty: quantities[it.id], unit: it.unit || '' })
+        ));
+
+        var seen = {};
+        var chipItems = [];
+        [3, 5, shelf].forEach(function (days) {
+          if (seen[days]) { return; }
+          seen[days] = true;
+          chipItems.push({
+            value: String(days),
+            label: days === shelf ? I18N.t('推荐 +{n}天', { n: days }) : I18N.t('+{n}天', { n: days })
+          });
+        });
+        var customInput = h('input', { type: 'date', class: 'date-input' });
+        var dateEl = h('div', { class: 'recv-date' });
+        function renderDate() {
+          var value = expiryState[it.id];
+          dateEl.textContent = value ? I18N.t('效期：{date}', { date: value }) : I18N.t('请选择效期');
+          dateEl.classList.toggle('missing', !value);
+        }
+        var chips = window.UI.chips(chipItems, {
+          selected: [String(shelf)],
+          onChange: function (value) {
+            expiryState[it.id] = value ? datePlus(Number(value)) : (customInput.value || null);
+            renderDate();
+          }
+        });
+        customInput.addEventListener('change', function () {
+          if (customInput.value) {
+            expiryState[it.id] = customInput.value;
+            chips.set(null);
+          }
+          renderDate();
+        });
+        card.appendChild(chips.el);
+        card.appendChild(h('div', { class: 'recv-custom' },
+          h('span', { class: 'recv-custom-label' }, I18N.t('自定义效期：')),
+          customInput
+        ));
+        card.appendChild(dateEl);
+        renderDate();
+        listWrap.appendChild(card);
+      });
+      content.appendChild(listWrap);
+
+      var note = h('textarea', {
+        class: 'input waste-description',
+        maxlength: '255',
+        placeholder: I18N.t('入库备注（选填）')
+      });
+      content.appendChild(window.UI.field(I18N.t('备注'), note));
+
+      var submit = h('button', { class: 'btn btn-primary btn-block' }, I18N.t('确认入库'));
+      submit.addEventListener('click', function () {
+        var lines = selected.map(function (it) {
+          return { item_id: it.id, qty: quantities[it.id], expiry_date: expiryState[it.id] };
+        });
+        if (lines.some(function (line) { return !line.expiry_date; })) {
+          window.UI.toast(I18N.t('请为所有明细选择效期'), 'warn');
+          return;
+        }
+        var totalQty = lines.reduce(function (sum, line) { return sum + line.qty; }, 0);
+        var confirmed = false;
+        window.UI.dialog({
+          title: I18N.t('确认入库'),
+          message: I18N.t('共 {n} 项、{total} 件商品，入库后将立即增加库存', { n: lines.length, total: totalQty }),
+          options: [
+            { label: I18N.t('确认入库'), value: true, kind: 'primary' },
+            { label: I18N.t('取消'), value: null, kind: 'ghost' }
+          ]
+        }).then(function (ok) {
+          if (!ok) { return; }
+          confirmed = true;
+          submit.disabled = true;
+          return API.receiveStock({ items: lines, note: note.value.trim() || null });
+        }).then(function () {
+          if (!confirmed) { return; }
+          window.UI.toast(I18N.t('入库成功 🎉'), 'success', 3000);
+          location.hash = '#/stock';
+        }).catch(function (err) {
+          submit.disabled = false;
+          if (err && err.silent) { return; }
+          window.UI.toast((err && err.message) || I18N.t('入库失败'), 'error');
+        });
+      });
+      setBar(root, [submit]);
+    }
+
+    function renderSelect(items) {
+      content.innerHTML = '';
+      setBar(root, null);
+      if (!items.length) {
+        content.appendChild(window.UI.emptyView(I18N.t('暂无库存品')));
+        return;
+      }
+      items.forEach(function (it) {
+        if (quantities[it.id] === undefined) { quantities[it.id] = 0; }
+      });
+      var search = h('input', { class: 'search-input', type: 'search', placeholder: I18N.t('搜索库存品…') });
+      var listWrap = h('div', {});
+      var filtered = items.slice();
+      var next = h('button', { class: 'btn btn-primary btn-block' }, I18N.t('下一步：填写效期'));
+
+      function selectedItems() {
+        return items.filter(function (it) { return quantities[it.id] > 0; });
+      }
+      function paint() {
+        listWrap.innerHTML = '';
+        if (!filtered.length) {
+          listWrap.appendChild(window.UI.emptyView(I18N.t('未找到匹配的库存品')));
+          return;
+        }
+        filtered.forEach(function (it) {
+          var row = h('div', { class: 'count-row' + (quantities[it.id] > 0 ? ' changed' : '') });
+          row.appendChild(h('div', { class: 'count-info' },
+            h('div', { class: 'count-name' }, it.name),
+            h('div', { class: 'count-sub' }, I18N.t('当前库存 {n} {unit}', { n: it.stock, unit: it.unit || '' }))
+          ));
+          var stepper = window.UI.stepper(quantities[it.id], {
+            min: 0,
+            max: 99999,
+            onChange: function (value) {
+              quantities[it.id] = value;
+              row.classList.toggle('changed', value > 0);
+              next.disabled = selectedItems().length < 1;
+            }
+          });
+          row.appendChild(stepper.el);
+          listWrap.appendChild(row);
+        });
+      }
+      search.addEventListener('input', function () {
+        var query = search.value.trim().toLowerCase();
+        filtered = items.filter(function (it) {
+          return (it.name || '').toLowerCase().indexOf(query) >= 0 ||
+            (it.category || '').toLowerCase().indexOf(query) >= 0;
+        });
+        paint();
+      });
+      next.disabled = selectedItems().length < 1;
+      next.addEventListener('click', function () {
+        var selected = selectedItems();
+        if (selected.length) { renderExpiry(selected, items); }
+      });
+      content.appendChild(h('div', { class: 'recv-title receive-page-title' }, I18N.t('直接入库')));
+      content.appendChild(h('div', { class: 'page-hint' }, I18N.t('选择到货商品和数量，再填写每批效期。')));
+      content.appendChild(search);
+      content.appendChild(listWrap);
+      paint();
+      setBar(root, [next]);
+    }
+
+    content.appendChild(window.UI.loadingView());
+    API.items(false).then(renderSelect).catch(function (err) {
+      if (err && err.silent) { return; }
+      content.innerHTML = '';
+      content.appendChild(window.UI.errorView((err && err.message) || I18N.t('库存品加载失败'), function () { renderRoute(); }));
+    });
+    return { root: root };
+  }
+
   /* ================= 采购（店长） ================= */
   function renderPurchase() {
     var root = h('div', { class: 'page purchase-page' });
@@ -2971,6 +3174,7 @@
     '/expiry': { render: renderExpiry },
     '/count-review': { render: renderCountReview, roles: ['manager', 'admin'] },
     '/waste-review': { render: renderWasteReview, roles: ['manager', 'admin'] },
+    '/receive': { render: renderStockReceive, roles: ['manager', 'admin'] },
     '/purchase': { render: renderPurchase, roles: ['manager', 'admin'] },
     '/items': { render: renderItems, roles: ['manager', 'admin'] },
     '/stock': { render: renderStock },

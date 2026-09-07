@@ -32,8 +32,8 @@ Token 包含用户的 `token_version`。改 PIN、管理员重置 PIN、停用�
 角色：
 
 - `staff`：每日够/不够盘点、独立提交每周实数盘点、查看自己的三天记录、报损登记、库存与效期查看
-- `manager`：可独立提交每周盘点；可选择另外两人提交的记录进行比对确认；另有报损核对、采购、库存品管理和流水查看
-- `admin`：用户管理和双人盘点确认；不提交每周盘点
+- `manager`：可独立提交每周盘点；可选择另外两人提交的记录进行比对确认；另有入库、报损核对、采购、库存品管理和流水查看
+- `admin`：拥有直接入库等管理权限，另负责用户管理和双人盘点确认；不提交每周盘点
 
 ## 核心数据
 
@@ -67,11 +67,12 @@ FEFO。业务单的核对/确认/取消用状态条件更新，因此重复或�
 - `GET /items?include_inactive=false`：每项附带最近一次有效盘点的 `last_count_at`、`last_count_qty`、`last_count_type`、`last_count_enough`；每日仅采用 `completed`，每周仅采用 `verified`，未填现场实数时数量为 `null`
 - `POST /items`、`PATCH /items/{id}`（manager+）：库存品包含 `daily_count_enabled`、`weekly_count_enabled` 两个布尔开关，均默认 `true`
 - `GET /stock`
+- `POST /stock/receive`（manager+）：`{items:[{item_id, qty, expiry_date}], note?}`，无需采购单直接创建入库批次
 - `GET /items/{id}/batches`
 - `GET /items/{id}/movements`（manager+）：该库存品的审计流水
 - `GET /expiry?days=3`
 
-系统不暴露直接改库存接口；数量只能通过采购入库、核对盘点或确认报损变化。
+入库逐行创建 `source=receive` 批次并写正数 `stock_receive` 流水；库存数量也可通过采购入库、核对盘点或确认报损变化。系统不暴露覆盖库存余额的接口。
 
 ### 盘点
 

@@ -71,7 +71,7 @@ class Batch(Base):
     initial_qty: Mapped[int] = mapped_column(Integer, default=0)  # 初始数量
     expiry_date: Mapped[str] = mapped_column(String(10))          # YYYY-MM-DD
     received_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
-    source: Mapped[str] = mapped_column(String(16), default="init")  # purchase|init|adjust
+    source: Mapped[str] = mapped_column(String(16), default="init")  # purchase|receive|init|adjust
     note: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     item: Mapped["Item"] = relationship()

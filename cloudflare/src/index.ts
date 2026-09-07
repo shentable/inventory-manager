@@ -28,6 +28,12 @@ const pinPattern = /^\d{4,6}$/;
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 const pinIterations = 100_000;
 
+function validDate(value: string): boolean {
+  if (!datePattern.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -650,6 +656,37 @@ async function itemRoutes(request: Request, env: Env, url: URL): Promise<Respons
 }
 
 async function stockRoutes(request: Request, env: Env, url: URL): Promise<Response | null> {
+  if (request.method === "POST" && url.pathname === "/api/stock/receive") {
+    const manager = await authenticate(request, env, "manager");
+    const input = await body(request);
+    if (!Array.isArray(input.items) || input.items.length === 0) throw new ApiError(400, "入库条目不能为空");
+    const lines = input.items.map((raw) => {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new ApiError(400, "入库条目格式无效");
+      const line = raw as Record<string, unknown>;
+      const expiry = text(line.expiry_date, "效期", 10, 10);
+      if (!validDate(expiry)) throw new ApiError(400, "效期必须为有效日期 YYYY-MM-DD");
+      return {
+        item_id: integer(line.item_id, "库存品", 1),
+        qty: integer(line.qty, "入库数量", 1),
+        expiry_date: expiry,
+      };
+    });
+    if (new Set(lines.map((line) => line.item_id)).size !== lines.length) throw new ApiError(400, "入库条目重复");
+    for (const line of lines) if (!await itemExists(env.DB, line.item_id)) throw new ApiError(400, `库存品不存在：${line.item_id}`);
+    const note = nullableText(input.note, 255);
+    const statements: D1PreparedStatement[] = [];
+    for (const line of lines) {
+      statements.push(env.DB.prepare("INSERT INTO batches(item_id, qty, initial_qty, expiry_date, source, note) VALUES(?, ?, ?, ?, 'receive', ?)").bind(line.item_id, line.qty, line.qty, line.expiry_date, note));
+      statements.push(env.DB.prepare("INSERT INTO stock_movements(item_id, batch_id, delta, operation, reference_type, reference_id, actor_id) VALUES(?, last_insert_rowid(), ?, 'stock_receive', 'manual', NULL, ?)").bind(line.item_id, line.qty, manager.id));
+    }
+    const results = await env.DB.batch(statements);
+    const batchIds = lines.map((_, index) => Number(results[index * 2].meta.last_row_id));
+    const batches = await Promise.all(batchIds.map(async (id) => {
+      const row = await env.DB.prepare("SELECT * FROM batches WHERE id = ?").bind(id).first<Record<string, unknown>>();
+      return { ...row, days_to_expiry: daysToExpiry(String(row!.expiry_date)) };
+    }));
+    return json(batches, 201);
+  }
   if (request.method === "GET" && url.pathname === "/api/stock") {
     await authenticate(request, env);
     const rows = (await env.DB.prepare(`
@@ -1270,7 +1307,7 @@ async function purchaseRoutes(request: Request, env: Env, url: URL): Promise<Res
       const line = raw as Record<string, unknown>;
       const lineId = integer(line.purchase_item_id, "采购行", 1);
       const date = text(line.expiry_date, "效期", 10, 10);
-      if (!datePattern.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`))) throw new ApiError(400, "效期必须为有效日期 YYYY-MM-DD");
+      if (!validDate(date)) throw new ApiError(400, "效期必须为有效日期 YYYY-MM-DD");
       expiry.set(lineId, date);
     }
     const lines = (await env.DB.prepare("SELECT * FROM purchase_items WHERE purchase_id = ? ORDER BY id").bind(id).all<{ id: number; item_id: number; qty: number }>()).results;

@@ -103,6 +103,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/items/{id}/batches", get(item_batches))
         .route("/api/items/{id}/movements", get(item_movements))
         .route("/api/stock", get(stock))
+        .route("/api/stock/receive", post(receive_stock))
         .route("/api/expiry", get(expiry))
         .route("/api/dashboard", get(dashboard))
         .route("/api/purchases", get(list_purchases).post(create_purchase))
@@ -687,6 +688,101 @@ async fn stock(State(s): State<AppState>, headers: HeaderMap) -> Result<Json<Val
     let mut st=db.prepare("SELECT id,name,category,unit,shelf_life_days,min_stock,daily_count_enabled,weekly_count_enabled,active FROM items WHERE active=1 ORDER BY sort_order,id")?;
     let rows=st.query_map([],|r|{let id:i64=r.get(0)?;let (qty,nearest,count):(i64,Option<String>,i64)=db.query_row("SELECT coalesce(sum(qty),0),min(CASE WHEN qty>0 THEN expiry_date END),coalesce(sum(CASE WHEN qty>0 THEN 1 ELSE 0 END),0) FROM batches WHERE item_id=?1",[id],|x|Ok((x.get(0)?,x.get(1)?,x.get(2)?)))?;Ok(json!({"item":{"id":id,"name":r.get::<_,String>(1)?,"category":r.get::<_,String>(2)?,"unit":r.get::<_,String>(3)?,"shelf_life_days":r.get::<_,i64>(4)?,"min_stock":r.get::<_,i64>(5)?,"daily_count_enabled":r.get::<_,bool>(6)?,"weekly_count_enabled":r.get::<_,bool>(7)?,"active":r.get::<_,bool>(8)?},"stock":qty,"nearest_expiry":nearest,"batch_count":count}))})?.collect::<Result<Vec<_>,_>>()?;
     Ok(Json(Value::Array(rows)))
+}
+#[derive(Deserialize)]
+struct StockReceiveLine {
+    item_id: i64,
+    qty: i64,
+    expiry_date: String,
+}
+#[derive(Deserialize)]
+struct StockReceiveIn {
+    items: Vec<StockReceiveLine>,
+    note: Option<String>,
+}
+async fn receive_stock(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    Json(p): Json<StockReceiveIn>,
+) -> Result<(StatusCode, Json<Value>), ApiError> {
+    let mut db = s.db.lock().unwrap();
+    let u = current_user(&db, &s.secret, &headers, Some("manager"), false)?;
+    if p.items.is_empty() {
+        return Err(ApiError::bad("入库条目不能为空"));
+    }
+    if p.note
+        .as_ref()
+        .is_some_and(|note| note.chars().count() > 255)
+    {
+        return Err(ApiError::bad("入库备注不能超过 255 个字符"));
+    }
+    let mut seen = HashSet::new();
+    for line in &p.items {
+        if line.qty < 1 {
+            return Err(ApiError::bad("入库数量必须大于 0"));
+        }
+        if !seen.insert(line.item_id) {
+            return Err(ApiError::bad("入库条目重复"));
+        }
+        if !item_exists(&db, line.item_id)? {
+            return Err(ApiError::bad(&format!("库存品不存在：{}", line.item_id)));
+        }
+        if NaiveDate::parse_from_str(&line.expiry_date, "%Y-%m-%d").is_err() {
+            return Err(ApiError::bad("效期必须为有效日期 YYYY-MM-DD"));
+        }
+    }
+
+    let received_at = now();
+    let note = p.note;
+    let tx = db.transaction()?;
+    let mut batch_ids = Vec::with_capacity(p.items.len());
+    for line in p.items {
+        tx.execute(
+            "INSERT INTO batches(item_id,qty,initial_qty,expiry_date,received_at,source,note) VALUES(?1,?2,?2,?3,?4,'receive',?5)",
+            params![line.item_id, line.qty, line.expiry_date, received_at, note],
+        )?;
+        let batch_id = tx.last_insert_rowid();
+        movement(
+            &tx,
+            line.item_id,
+            batch_id,
+            line.qty,
+            "stock_receive",
+            "manual",
+            None,
+            u.id,
+        )?;
+        batch_ids.push(batch_id);
+    }
+    tx.commit()?;
+
+    let today = store_today();
+    let mut batches = Vec::with_capacity(batch_ids.len());
+    for id in batch_ids {
+        let row = db.query_row(
+            "SELECT id,item_id,qty,initial_qty,expiry_date,received_at,source,note FROM batches WHERE id=?1",
+            [id],
+            |r| {
+                let expiry: String = r.get(4)?;
+                let days = NaiveDate::parse_from_str(&expiry, "%Y-%m-%d")
+                    .map(|date| (date - today).num_days())
+                    .unwrap_or(0);
+                Ok(json!({
+                    "id": r.get::<_, i64>(0)?,
+                    "item_id": r.get::<_, i64>(1)?,
+                    "qty": r.get::<_, i64>(2)?,
+                    "initial_qty": r.get::<_, i64>(3)?,
+                    "expiry_date": expiry,
+                    "received_at": out_dt(r.get(5)?),
+                    "source": r.get::<_, String>(6)?,
+                    "note": r.get::<_, Option<String>>(7)?,
+                    "days_to_expiry": days,
+                }))
+            },
+        )?;
+        batches.push(row);
+    }
+    Ok((StatusCode::CREATED, Json(Value::Array(batches))))
 }
 #[derive(Deserialize, Default)]
 struct ExpiryQuery {

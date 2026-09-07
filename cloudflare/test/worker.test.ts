@@ -72,6 +72,17 @@ describe("Workers + D1 inventory contract", () => {
     const secondItemResponse = await request("/items", "POST", manager, { name: "测试火腿", unit: "片", shelf_life_days: 7, min_stock: 3 });
     const secondItem = await secondItemResponse.json() as { id: number };
 
+    expect((await request("/stock/receive", "POST", staff, { items: [{ item_id: item.id, qty: 1, expiry_date: "2026-09-07" }] })).status).toBe(403);
+    expect((await request("/stock/receive", "POST", manager, { items: [{ item_id: item.id, qty: 1, expiry_date: "2026-02-31" }] })).status).toBe(400);
+    const directReceive = await request("/stock/receive", "POST", manager, {
+      items: [{ item_id: item.id, qty: 2, expiry_date: "2026-09-08" }],
+      note: "临时补货",
+    });
+    expect(directReceive.status).toBe(201);
+    expect(await directReceive.json()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ item_id: item.id, qty: 2, initial_qty: 2, source: "receive", note: "临时补货" }),
+    ]));
+
     const purchaseResponse = await request("/purchases", "POST", manager, { items: [{ item_id: item.id, qty: 10 }, { item_id: secondItem.id, qty: 6 }] });
     const purchase = await purchaseResponse.json() as { id: number; items: Array<{ id: number }> };
     expect((await request(`/purchases/${purchase.id}/receive`, "POST", manager, { items: purchase.items.map((line) => ({ purchase_item_id: line.id, expiry_date: "2026-09-07" })) })).status).toBe(200);

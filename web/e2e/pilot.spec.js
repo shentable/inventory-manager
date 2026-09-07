@@ -35,6 +35,7 @@ test.describe.serial('门店试运行浏览器流程', () => {
     await page.locator('.user-card', { hasText: '@staff · Staff' }).click();
     await expect(page.locator('.pin-card .dialog-msg')).toHaveText('Enter PIN (4-6 digits)');
     await enterPin(page, '3333');
+    await expect(page.getByRole('link', { name: 'Source code' })).toHaveAttribute('href', 'https://github.com/shentable/inventory-manager');
     await expect(page.locator('.feat-card', { hasText: 'Weekly count' })).toBeVisible();
     await expect(page.locator('.feat-card', { hasText: 'Waste' })).toBeVisible();
   });
@@ -61,6 +62,7 @@ test.describe.serial('门店试运行浏览器流程', () => {
   test('两名店员独立提交每周盘点', async ({ page }) => {
     await login(page, 'staff', '3333');
     await expect(page.locator('.feat-card', { hasText: '采购' })).toHaveCount(0);
+    await expect(page.locator('.feat-card', { hasText: '直接增加库存批次' })).toHaveCount(0);
     await expect(page.locator('.feat-card', { hasText: '用户管理' })).toHaveCount(0);
     await expect(page.locator('.feat-card', { hasText: '每周盘点' })).toBeVisible();
     await page.locator('.feat-card', { hasText: '每日盘点' }).click();
@@ -207,12 +209,13 @@ test.describe.serial('门店试运行浏览器流程', () => {
     await expect(page.locator('.success-title')).toHaveText('已提交，等待店长确认');
   });
 
-  test('店长比对两份盘点、确认报损和采购入库', async ({ page }) => {
+  test('店长直接入库、比对两份盘点、确认报损和采购入库', async ({ page }) => {
     await login(page, 'manager', '2222');
     await expect(page.locator('.feat-card', { hasText: '盘点管理' })).toBeVisible();
     await expect(page.locator('.feat-card', { hasText: '盘点汇总' })).toHaveCount(0);
     await expect(page.locator('.dash-card', { hasText: '近3天盘点' })).toHaveCount(0);
     await expect(page.locator('.feat-card', { hasText: '采购' })).toBeVisible();
+    await expect(page.locator('.feat-card', { hasText: '直接增加库存批次' })).toBeVisible();
     await expect(page.locator('.feat-card', { hasText: '用户管理' })).toHaveCount(0);
 
     await expect(page.locator('.dash-card', { hasText: '今日盘点结果' })).toBeVisible();
@@ -222,6 +225,15 @@ test.describe.serial('门店试运行浏览器流程', () => {
     await expect(page.locator('.daily-result-card').first().locator('.tag.short')).toHaveText('不够 2 项');
     await page.locator('.daily-result-card').first().click();
     await expect(page.locator('.daily-result-line.lacking')).toHaveCount(2);
+
+    await page.goto('/#/receive');
+    await page.locator('.count-row').first().getByRole('button', { name: '增加' }).click();
+    await page.getByRole('button', { name: '下一步：填写效期' }).click();
+    await expect(page.locator('.recv-card')).toHaveCount(1);
+    await page.getByPlaceholder('入库备注（选填）').fill('临时到货');
+    await page.getByRole('button', { name: '确认入库' }).click();
+    await page.locator('.overlay:not(.hide)').getByRole('button', { name: '确认入库' }).click();
+    await expect(page.locator('.toast-msg', { hasText: '入库成功' })).toBeVisible();
 
     await page.goto('/#/stock');
     const stockRows = await page.evaluate(() => window.API.stock());
@@ -409,5 +421,6 @@ test.describe.serial('门店试运行浏览器流程', () => {
     await login(page, 'shop_staff', '3333');
     await expect(page.locator('.home-user-name')).toHaveText('店员');
     await expect(page.locator('.feat-card', { hasText: '采购' })).toBeVisible();
+    await expect(page.locator('.feat-card', { hasText: '直接增加库存批次' })).toBeVisible();
   });
 });

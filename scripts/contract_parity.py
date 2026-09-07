@@ -92,6 +92,17 @@ def scenario(base: str):
          "min_stock": 1, "sort_order": 50},
         admin["token"],
     )
+    call(
+        "POST", "/api/stock/receive",
+        {"items": [{"item_id": item["id"], "qty": 1, "expiry_date": "2099-11-30"}]},
+        staff["token"],
+    )
+    call(
+        "POST", "/api/stock/receive",
+        {"items": [{"item_id": item["id"], "qty": 2, "expiry_date": "2099-11-30"}],
+         "note": "direct contract"},
+        admin["token"],
+    )
     purchase, _ = call(
         "POST", "/api/purchases",
         {"items": [{"item_id": item["id"], "qty": 7}], "note": "contract"},

@@ -280,6 +280,7 @@
 
     // 库存与效期
     stock: function () { return request('/stock'); },
+    receiveStock: function (body) { return request('/stock/receive', { method: 'POST', body: body }); },
     itemBatches: function (id) { return request('/items/' + id + '/batches'); },
     expiry: function (days) { return request('/expiry?days=' + days); },
 

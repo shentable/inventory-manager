@@ -203,6 +203,22 @@ class StockEntry(BaseModel):
     batch_count: int
 
 
+class StockReceiveItem(BaseModel):
+    item_id: int
+    qty: int = Field(ge=1)
+    expiry_date: str
+
+    @field_validator("expiry_date")
+    @classmethod
+    def _check_expiry(cls, v: str) -> str:
+        return _check_date(v)
+
+
+class StockReceiveIn(BaseModel):
+    items: list[StockReceiveItem] = Field(min_length=1)
+    note: Optional[str] = Field(default=None, max_length=255)
+
+
 class ExpiryEntry(BaseModel):
     batch_id: int
     item_id: int
