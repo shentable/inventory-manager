@@ -25,6 +25,7 @@ test.describe.serial('门店试运行浏览器流程', () => {
 
     await page.goto('/#/login');
     await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
+    await expect(page.getByText('店员系统 · 服务由店内网络提供')).toHaveCount(0);
     await page.getByRole('button', { name: '选择语言' }).click();
     await page.locator('.overlay:not(.hide)').getByRole('button', { name: 'English' }).click();
     await expect(page.locator('html')).toHaveAttribute('lang', 'en');

@@ -171,7 +171,6 @@ window.I18N_EN_APP = {
   '库存查询': 'Stock lookup',
   '库存概览': 'Stock overview',
   '店员': 'Staff',
-  '店员系统 · 服务由店内网络提供': 'Staff system · served over the store network',
   '店长': 'Manager',
   '当前库存 {n} {unit}': 'Current stock {n} {unit}',
   '当前库存：{n} {unit}': 'Current stock: {n} {unit}',

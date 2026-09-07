@@ -1,4 +1,4 @@
-const SHELL_CACHE = 'sandwich-shell-v27';
+const SHELL_CACHE = 'sandwich-shell-v28';
 const SHELL = [
   '/', '/index.html', '/config.js', '/styles.css', '/app.js',
   '/js/i18n.js', '/js/i18n/en-core.js', '/js/i18n/en-app.js',

@@ -241,10 +241,7 @@
     );
     var listWrap = h('div', { class: 'login-users' });
     root.appendChild(listWrap);
-    root.appendChild(h('div', { class: 'login-footer-wrap' },
-      h('div', { class: 'login-foot' }, I18N.t('店员系统 · 服务由店内网络提供')),
-      copyrightFooter()
-    ));
+    root.appendChild(copyrightFooter());
 
     return API.loginOptions().then(function (data) {
       var users = (data && data.users) || [];
