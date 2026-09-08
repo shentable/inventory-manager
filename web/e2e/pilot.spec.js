@@ -231,7 +231,8 @@ test.describe.serial('门店试运行浏览器流程', () => {
     await expect(page.locator('.daily-result-line.lacking')).toHaveCount(2);
 
     await page.goto('/#/receive');
-    await page.locator('.count-row').first().getByRole('button', { name: '增加' }).click();
+    // Receive an item outside the pending count pair; post-count receipts now require a recount.
+    await page.locator('.count-row').nth(2).getByRole('button', { name: '增加' }).click();
     await page.getByRole('button', { name: '下一步：填写效期' }).click();
     await expect(page.locator('.recv-card')).toHaveCount(1);
     await page.getByPlaceholder('入库备注（选填）').fill('临时到货');

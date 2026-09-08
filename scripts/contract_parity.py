@@ -62,7 +62,7 @@ def normalize(value):
     if isinstance(value, list):
         return [normalize(item) for item in value]
     if isinstance(value, dict):
-        ignored = {"token", "backend_kind", "app_version", "comparison_token"}
+        ignored = {"token", "backend_kind", "app_version", "comparison_token", "as_of"}
         return {
             key: normalize(item)
             for key, item in value.items()
@@ -84,6 +84,8 @@ def scenario(base: str):
     admin, _ = call("POST", "/api/auth/login", {"username": "admin", "pin": "1111"})
     staff, _ = call("POST", "/api/auth/login", {"username": "staff", "pin": "3333"})
     staff_b, _ = call("POST", "/api/auth/login", {"username": "staff_b", "pin": "4444"})
+    call("GET", "/api/consumption", token=staff["token"])
+    call("GET", "/api/consumption?days=28&lead_days=3&coverage_days=5", token=admin["token"])
     call("GET", "/api/purchases", token=staff["token"])  # 权限必须同为 403
     item, _ = call(
         "POST",
@@ -195,6 +197,13 @@ def scenario(base: str):
     )
     call("GET", f"/api/count-comparisons/{comparison['id']}", token=admin["token"])
     call("GET", "/api/counts?count_type=weekly&days=3", token=staff["token"])
+    fractional, _ = call("POST", "/api/items", {"name": "契约小数", "unit": "公斤", "min_stock": 0.5}, admin["token"])
+    for qty, expiry in [(0.1, "2099-01-01"), (0.2, "2099-02-01")]:
+        call("POST", "/api/stock/receive", {"items": [{"item_id": fractional["id"], "qty": qty, "expiry_date": expiry}]}, admin["token"])
+    fractional_waste, _ = call("POST", "/api/waste", {"item_id": fractional["id"], "qty": 0.3, "reason": "小数扣减"}, staff["token"])
+    call("POST", f"/api/waste/{fractional_waste['id']}/confirm", token=admin["token"])
+    call("GET", f"/api/items/{fractional['id']}/batches", token=admin["token"])
+    call("GET", f"/api/items/{fractional['id']}/movements", token=admin["token"])
     rate_statuses = []
     retry_seen = False
     for _ in range(5):

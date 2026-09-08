@@ -24,7 +24,7 @@ def get_stock(
     result = []
     for it in items:
         batches = positive_batches(db, it.id)
-        stock = sum(b.qty for b in batches)
+        stock = round(sum(b.qty for b in batches), 1)
         nearest = min((b.expiry_date for b in batches), default=None)
         result.append(
             StockEntry(

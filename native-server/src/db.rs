@@ -2,7 +2,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use std::path::Path;
 use uuid::Uuid;
 
-pub const DB_SCHEMA: &str = "20260904_08";
+pub const DB_SCHEMA: &str = "20260908_09";
 
 pub fn open(path: &Path) -> rusqlite::Result<Connection> {
     if let Some(parent) = path.parent() {
@@ -49,6 +49,7 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             && v != "20260904_05"
             && v != "20260904_06"
             && v != "20260904_07"
+            && v != "20260904_08"
             && v != DB_SCHEMA
     }) {
         return Err(rusqlite::Error::InvalidQuery); // 不得静默降级未知的新 schema
@@ -134,6 +135,24 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
          ON count_sessions(business_date)
          WHERE count_type='daily' AND business_date IS NOT NULL;",
     )?;
+    // The scale conversion and version stamp must commit together. A database
+    // created by the current Python test/bootstrap metadata may already be scaled.
+    let recorded_schema: Option<String> = conn
+        .query_row(
+            "SELECT schema_version FROM store_meta WHERE id=1",
+            [],
+            |r| r.get(0),
+        )
+        .optional()?;
+    conn.execute_batch("SAVEPOINT quantity_migration")?;
+    if existing_version.as_deref() != Some(DB_SCHEMA)
+        && recorded_schema.as_deref() != Some(DB_SCHEMA)
+    {
+        if let Err(err) = conn.execute_batch(include_str!("../migrations/20260908_09.sql")) {
+            conn.execute_batch("ROLLBACK TO quantity_migration; RELEASE quantity_migration")?;
+            return Err(err);
+        }
+    }
     let store_id: Option<String> = conn
         .query_row("SELECT store_id FROM store_meta WHERE id=1", [], |row| {
             row.get(0)
@@ -160,6 +179,7 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     } else {
         conn.execute("UPDATE alembic_version SET version_num=?1", [DB_SCHEMA])?;
     }
+    conn.execute_batch("RELEASE quantity_migration")?;
     Ok(())
 }
 
@@ -183,6 +203,54 @@ pub fn bootstrap_admin(conn: &Connection, pin: Option<&str>) -> anyhow::Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_quantities_scale_once() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        conn.execute_batch("
+            UPDATE alembic_version SET version_num='20260904_08';
+            UPDATE store_meta SET schema_version='20260904_08';
+            INSERT INTO users(id,username,display_name,pin_hash,role) VALUES(1,'legacy','Legacy','x','manager');
+            INSERT INTO purchases(id,created_by) VALUES(1,1);
+            INSERT INTO count_sessions(id,created_by) VALUES(1,1),(2,1);
+            INSERT INTO count_comparisons(id,first_session_id,second_session_id,resolution,confirmed_by) VALUES(1,1,2,'no_difference',1);
+            INSERT INTO items(id,name,min_stock) VALUES(1,'Legacy',5);
+            INSERT INTO batches(id,item_id,qty,initial_qty,expiry_date) VALUES(1,1,5,8,'2099-01-01');
+            INSERT INTO stock_movements(item_id,batch_id,delta,operation,reference_type,actor_id) VALUES(1,1,-3,'waste','waste',1);
+            INSERT INTO count_entries(session_id,item_id,qty_counted,expected_qty,reported_qty,reviewed_qty) VALUES(1,1,5,8,NULL,5);
+            INSERT INTO count_comparison_entries(comparison_id,item_id,first_qty,second_qty,final_qty,result) VALUES(1,1,5,6,5,'different');
+            INSERT INTO purchase_items(purchase_id,item_id,qty) VALUES(1,1,8);
+            INSERT INTO waste_records(item_id,qty,reason,reported_by) VALUES(1,3,'broken',1);
+        ").unwrap();
+        migrate(&conn).unwrap();
+        migrate(&conn).unwrap();
+        for (sql, expected) in [
+            ("SELECT min_stock FROM items", 50),
+            ("SELECT qty FROM batches", 50),
+            ("SELECT initial_qty FROM batches", 80),
+            ("SELECT delta FROM stock_movements", -30),
+            ("SELECT qty_counted FROM count_entries", 50),
+            ("SELECT expected_qty FROM count_entries", 80),
+            ("SELECT reviewed_qty FROM count_entries", 50),
+            ("SELECT first_qty FROM count_comparison_entries", 50),
+            ("SELECT second_qty FROM count_comparison_entries", 60),
+            ("SELECT final_qty FROM count_comparison_entries", 50),
+            ("SELECT qty FROM purchase_items", 80),
+            ("SELECT qty FROM waste_records", 30),
+        ] {
+            assert_eq!(
+                conn.query_row(sql, [], |r| r.get::<_, i64>(0)).unwrap(),
+                expected
+            );
+        }
+        assert!(
+            conn.query_row("SELECT reported_qty FROM count_entries", [], |r| r
+                .get::<_, Option<i64>>(0))
+                .unwrap()
+                .is_none()
+        );
+    }
 
     #[test]
     fn refuses_unknown_future_schema() {

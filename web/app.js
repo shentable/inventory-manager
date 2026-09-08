@@ -393,6 +393,7 @@
     if (canReview) { feats.push({ icon: '✔️', label: I18N.t('确认报损'), desc: I18N.t('处理报损'), to: '#/waste-review' }); }
     if (canReview) { feats.push({ icon: '📥', label: I18N.t('入库'), desc: I18N.t('直接增加库存批次'), to: '#/receive' }); }
     if (canReview) { feats.push({ icon: '🛒', label: I18N.t('采购'), desc: I18N.t('下单与入库'), to: '#/purchase' }); }
+    if (canReview) { feats.push({ icon: '📊', label: I18N.t('消耗与补货'), desc: I18N.t('用量趋势与库存预测'), to: '#/consumption' }); }
     if (canReview) { feats.push({ icon: '🏷️', label: I18N.t('库存品管理'), desc: I18N.t('商品资料'), to: '#/items' }); }
     if (role === 'admin') { feats.push({ icon: '👥', label: I18N.t('用户管理'), desc: I18N.t('账号、身份与 PIN'), to: '#/users' }); }
 
@@ -451,8 +452,8 @@
         var current = items[answers.length];
         var rawQty = qtyDrafts[current.id];
         var qty = rawQty === '' || rawQty === undefined ? null : Number(rawQty);
-        if (qty !== null && (!Number.isInteger(qty) || qty < 0)) {
-          window.UI.toast(I18N.t('数量必须是大于或等于 0 的整数'), 'error');
+        if (qty !== null && (!/^\d+(?:\.\d?)?$/.test(String(rawQty)) || !Number.isFinite(qty) || qty < 0)) {
+          window.UI.toast(I18N.t('数量必须大于或等于 0，最多一位小数'), 'error');
           return;
         }
         if (!enough && qty === null) {
@@ -535,8 +536,8 @@
 
         var item = items[idx];
         var qtyInput = h('input', {
-          class: 'swipe-qty-input', type: 'number', min: '0', step: '1',
-          inputmode: 'numeric', placeholder: I18N.t('不够必填，够可不填'),
+          class: 'swipe-qty-input', type: 'number', min: '0', step: '0.1',
+          inputmode: 'decimal', placeholder: I18N.t('不够必填，够可不填'),
           'aria-label': I18N.t('{name}现场数量', { name: item.name })
         });
         if (qtyDrafts[item.id] !== undefined) { qtyInput.value = qtyDrafts[item.id]; }
@@ -725,6 +726,7 @@
 
       var submit = h('button', { class: 'btn btn-primary btn-block' }, I18N.t('提交并等待比对'));
       submit.addEventListener('click', function () {
+        if (!window.UI.validateQuantities(root, counts)) { return; }
         var changed = items.filter(function (it) { return counts[it.id] !== it.stock; });
         var allEntries = items.map(function (it) { return { item_id: it.id, qty: counts[it.id] }; });
         var changedEntries = changed.map(function (it) { return { item_id: it.id, qty: counts[it.id] }; });
@@ -822,12 +824,12 @@
       }
       if (state.step < 3) {
         var next = h('button', { class: 'btn btn-primary' }, I18N.t('下一步'));
-        next.disabled = state.step === 1 ? !state.item : state.qty < 1;
-        next.addEventListener('click', function () { state.step++; renderStep(); });
+        next.disabled = state.step === 1 ? !state.item : state.qty < 0.1;
+        next.addEventListener('click', function () { if (state.step === 2 && !window.UI.validateQuantities(root, { qty: state.qty })) { return; } state.step++; renderStep(); });
         children.push(next);
       } else {
         var submit = h('button', { class: 'btn btn-primary' }, I18N.t('提交报损'));
-        submit.disabled = !state.reason || state.qty < 1;
+        submit.disabled = !state.reason || state.qty < 0.1;
         submit.addEventListener('click', function () {
           var batchTxt = state.batchId ? I18N.t('（指定批次）') : I18N.t('（FEFO 自动扣减）');
           var submitted = false;
@@ -882,14 +884,14 @@
             h('div', { class: 'pick-sub' }, I18N.t('库存 {n} {unit}', { n: it.stock, unit: it.unit || '' }))
           );
           card.addEventListener('click', function () {
-            if (it.stock < 1) {
+            if (it.stock < 0.1) {
               window.UI.toast(I18N.t('该品库存为 0，无法报损'), 'warn');
               return;
             }
             state.item = it;
             state.itemId = it.id;
             state.batchId = null;
-            state.qty = 1;
+            state.qty = Math.min(1, state.item.stock);
             state.batches = [];
             state.step = 2;
             renderStep();
@@ -926,14 +928,14 @@
       );
       var qtyBox = h('div', { class: 'qty-box' });
       var st = window.UI.stepper(state.qty || 1, {
-        min: 1, max: Math.max(1, it.stock),
+        min: 0.1, max: it.stock, step: 0.1,
         onChange: function (v) { state.qty = v; }
       });
       qtyBox.appendChild(st.el);
       var batchBox = h('div', { class: 'batch-box' });
 
       return API.itemBatches(it.id).then(function (batches) {
-        if (!root.isConnected || state.step !== 2) { return; }
+        if (state.step !== 2) { return; }
         batches = batches || [];
         state.batches = batches;
         body.innerHTML = '';
@@ -965,7 +967,7 @@
         }
         body.appendChild(batchBox);
       }).catch(function (err) {
-        if (!root.isConnected || state.step !== 2) { return; }
+        if (state.step !== 2) { return; }
         body.innerHTML = '';
         body.appendChild(info);
         body.appendChild(qtyBox);
@@ -1048,14 +1050,14 @@
       initPromise = API.items(false).then(function (items) {
         var found = null;
         (items || []).forEach(function (it) { if (Number(it.id) === Number(state.itemId)) { found = it; } });
-        if (!found || !(found.stock >= 1)) {
+        if (!found || !(found.stock >= 0.1)) {
           window.UI.toast(!found ? I18N.t('未找到该库存品') : I18N.t('该品库存为 0，无法报损'), 'warn');
           state.itemId = null;
           state.batchId = null;
           state.step = 1;
         } else {
           state.item = found;
-          state.qty = 1;
+          state.qty = Math.min(1, state.item.stock);
         }
       }).catch(function () {
         state.itemId = null;
@@ -1439,7 +1441,7 @@
           list.innerHTML = '';
           editableEntries.forEach(function (entry) {
             var input = h('input', {
-              class: 'review-qty-input', type: 'number', inputmode: 'numeric', min: '0', step: '1',
+              class: 'review-qty-input', type: 'number', inputmode: 'decimal', min: '0', step: '0.1',
               value: draft[entry.item_id] === undefined ? '' : draft[entry.item_id],
               'aria-label': I18N.t('{name}盘点数量', { name: entry.item_name || I18N.t('商品#{id}', { id: entry.item_id }) })
             });
@@ -1500,7 +1502,7 @@
           for (var i = 0; i < editableEntries.length; i++) {
             var entry = editableEntries[i];
             var raw = inputs[entry.item_id].value.trim();
-            if (!/^\d+$/.test(raw)) { window.UI.toast(I18N.t('请填写全部盘点数量'), 'warn'); inputs[entry.item_id].focus(); return; }
+            if (!/^\d+(?:\.\d?)?$/.test(raw)) { window.UI.toast(I18N.t('请填写全部盘点数量'), 'warn'); inputs[entry.item_id].focus(); return; }
             entries.push({ item_id: entry.item_id, qty: Number(raw) });
           }
           save.disabled = true;
@@ -1670,7 +1672,7 @@
           content.appendChild(h('div', { class: 'result-help' }, I18N.t('这里只录入两份记录不一致的共同项目；一致项自动沿用，缺失项不更新。')));
           var inputs = {};
           correctionRows.forEach(function (row) {
-            var input = h('input', { class: 'review-qty-input', type: 'number', inputmode: 'numeric', min: '0', step: '1', placeholder: I18N.t('最终数量'), 'aria-label': I18N.t('{name}最终数量', { name: row.item_name }) });
+            var input = h('input', { class: 'review-qty-input', type: 'number', inputmode: 'decimal', min: '0', step: '0.1', placeholder: I18N.t('最终数量'), 'aria-label': I18N.t('{name}最终数量', { name: row.item_name }) });
             inputs[row.item_id] = input;
             content.appendChild(h('label', { class: 'review-entry-row' },
               h('div', { class: 'diff-info' }, h('div', { class: 'diff-name' }, row.item_name), h('div', { class: 'diff-sub' }, row.first_qty + ' ⇄ ' + row.second_qty + ' ' + row.unit)),
@@ -1688,7 +1690,7 @@
             for (var i = 0; i < correctionRows.length; i++) {
               var row = correctionRows[i];
               var value = inputs[row.item_id].value.trim();
-              if (!/^\d+$/.test(value)) { window.UI.toast(I18N.t('请填写全部差异项最终数量'), 'warn'); return; }
+              if (!/^\d+(?:\.\d?)?$/.test(value)) { window.UI.toast(I18N.t('请填写全部差异项最终数量'), 'warn'); return; }
               corrections.push({ item_id: row.item_id, qty: Number(value) });
             }
             if (!note.value.trim()) { window.UI.toast(I18N.t('请填写更正原因'), 'warn'); return; }
@@ -1702,7 +1704,9 @@
         if (!d.different_count) {
           var direct = h('button', { class: 'btn btn-green' }, I18N.t('两份一致，确认落库'));
           direct.addEventListener('click', function () { submit('no_difference'); });
-          setBar(root, [back, direct]);
+          var recount = h('button', { class: 'btn btn-ghost' }, I18N.t('退回两人重新盘点'));
+          recount.addEventListener('click', function () { reasonThen('recount_required', I18N.t('退回重盘原因')); });
+          setBar(root, [back, recount, direct]);
           return;
         }
         var normal = h('button', { class: 'btn btn-green' }, I18N.t('正常消耗，采用后提交'));
@@ -2085,11 +2089,10 @@
           window.UI.toast(I18N.t('请为所有明细选择效期'), 'warn');
           return;
         }
-        var totalQty = lines.reduce(function (sum, line) { return sum + line.qty; }, 0);
         var confirmed = false;
         window.UI.dialog({
           title: I18N.t('确认入库'),
-          message: I18N.t('共 {n} 项、{total} 件商品，入库后将立即增加库存', { n: lines.length, total: totalQty }),
+          message: I18N.t('共 {n} 项，入库后将生成库存批次', { n: lines.length }),
           options: [
             { label: I18N.t('确认入库'), value: true, kind: 'primary' },
             { label: I18N.t('取消'), value: null, kind: 'ghost' }
@@ -2165,6 +2168,7 @@
       });
       next.disabled = selectedItems().length < 1;
       next.addEventListener('click', function () {
+        if (!window.UI.validateQuantities(root, quantities)) { return; }
         var selected = selectedItems();
         if (selected.length) { renderExpiry(selected, items); }
       });
@@ -2315,7 +2319,7 @@
               min: 0, max: 999,
               onChange: function (v) {
                 qty[it.id] = v;
-                if (submit) { submit.disabled = total() < 1; }
+                if (submit) { submit.disabled = total() < 0.1; }
               }
             });
             row.appendChild(info);
@@ -2338,14 +2342,14 @@
         submit = h('button', { class: 'btn btn-primary btn-block' }, I18N.t('提交采购单'));
         submit.disabled = true;
         submit.addEventListener('click', function () {
+          if (!window.UI.validateQuantities(root, qty)) { return; }
           var payload = items.filter(function (it) { return qty[it.id] > 0; })
             .map(function (it) { return { item_id: it.id, qty: qty[it.id] }; });
           if (!payload.length) { return; }
-          var totalQty = payload.reduce(function (s, x) { return s + x.qty; }, 0);
           var done = false;
           window.UI.dialog({
             title: I18N.t('提交采购单'),
-            message: I18N.t('共 {n} 项、{total} 件商品', { n: payload.length, total: totalQty }),
+            message: I18N.t('共 {n} 项', { n: payload.length }),
             options: [
               { label: I18N.t('确认提交'), value: true, kind: 'primary' },
               { label: I18N.t('取消'), value: null, kind: 'ghost' }
@@ -2741,7 +2745,7 @@
         });
       });
       var shelfInput = h('input', { class: 'input', type: 'number', inputmode: 'numeric', min: '1', placeholder: I18N.t('如：7'), value: item && item.shelf_life_days !== null && item.shelf_life_days !== undefined ? item.shelf_life_days : '' });
-      var minInput = h('input', { class: 'input', type: 'number', inputmode: 'numeric', min: '0', placeholder: I18N.t('如：2'), value: item && item.min_stock !== null && item.min_stock !== undefined ? item.min_stock : '0' });
+      var minInput = h('input', { class: 'input quantity-input', type: 'number', inputmode: 'decimal', min: '0', step: '0.1', placeholder: I18N.t('如：2'), value: item && item.min_stock !== null && item.min_stock !== undefined ? item.min_stock : '0' });
       var dailyCountInput = h('input', { type: 'checkbox' });
       var weeklyCountInput = h('input', { type: 'checkbox' });
       dailyCountInput.checked = item ? item.daily_count_enabled !== false : true;
@@ -2767,7 +2771,8 @@
         var cat = catSelect.value === '__new__' ? '' : catSelect.value.trim();
         var unit = unitSelect.value === '__new__' ? '' : unitSelect.value.trim();
         var shelf = parseInt(shelfInput.value, 10);
-        var min = parseInt(minInput.value, 10);
+        if (!/^\d+(?:\.\d?)?$/.test(minInput.value)) { window.UI.toast(I18N.t('数量必须大于或等于 0，最多一位小数'), 'warn'); return; }
+        var min = Number(minInput.value);
         if (!name) { window.UI.toast(I18N.t('请填写名称'), 'warn'); return; }
         if (!cat) { window.UI.toast(I18N.t('请选择或新增分类'), 'warn'); return; }
         if (!unit) { window.UI.toast(I18N.t('请选择或新增单位'), 'warn'); return; }
@@ -2794,6 +2799,186 @@
     }
 
     showList();
+    return { root: root };
+  }
+
+  /* ================= 消耗与补货（店长、管理员） ================= */
+  function renderConsumption() {
+    var root = h('div', { class: 'page consumption-page' });
+    root.appendChild(h('div', { class: 'page-title' }, I18N.t('消耗与补货')));
+    root.appendChild(h('p', { class: 'consumption-intro' }, I18N.t('从确认盘点反推用量，优先处理现场缺货与补货风险。')));
+    var issueLabels = {
+      no_count: I18N.t('尚无有效双人盘点'),
+      insufficient_history: I18N.t('需要两次有效盘点结果'),
+      corrected_time_unknown: I18N.t('更正数量的实盘时间不明确'),
+      invalid_time: I18N.t('盘点时间异常'),
+      late_confirmation: I18N.t('盘点与确认相隔超过 6 小时'),
+      movement_during_confirmation: I18N.t('盘点至确认间发生库存变动'),
+      waste_crosses_count: I18N.t('报损审批跨越盘点，需核对'),
+      short_period: I18N.t('两次盘点间隔不足 1 天'),
+      outside_window: I18N.t('周期起点超出统计范围'),
+      pending_waste: I18N.t('存在待确认报损'),
+      negative_consumption: I18N.t('反推用量为负，需核对入库与盘点'),
+      stale_count: I18N.t('最近实盘超过 14 天'),
+      expired_stock: I18N.t('账面有过期库存，需先核实处理'),
+      zero_rate: I18N.t('有效周期用量为零，暂不预测')
+    };
+    var statusLabels = {
+      shortage: I18N.t('今日现场报缺'), reorder: I18N.t('建议补货'),
+      review: I18N.t('待核查'), ok: I18N.t('暂可覆盖到货等待期')
+    };
+    var windowSelect = h('select', { class: 'input', 'aria-label': I18N.t('统计范围') },
+      h('option', { value: '28' }, I18N.t('近 28 天')),
+      h('option', { value: '56', selected: 'selected' }, I18N.t('近 56 天')),
+      h('option', { value: '84' }, I18N.t('近 84 天'))
+    );
+    var lead = h('input', { class: 'input', type: 'number', min: '0', max: '30', step: '1', value: '2', required: 'required', 'aria-label': I18N.t('到货等待天数') });
+    var coverage = h('input', { class: 'input', type: 'number', min: '1', max: '30', step: '1', value: '7', required: 'required', 'aria-label': I18N.t('到货后覆盖天数') });
+    var apply = h('button', { class: 'btn btn-primary', type: 'submit' }, I18N.t('更新测算'));
+    var form = h('form', { class: 'consumption-controls' },
+      window.UI.field(I18N.t('统计范围'), windowSelect),
+      h('div', { class: 'consumption-control-pair' },
+        window.UI.field(I18N.t('到货等待天数'), lead), window.UI.field(I18N.t('到货后覆盖天数'), coverage)), apply
+    );
+    root.appendChild(form);
+    var settings = h('details', { class: 'consumption-settings' }, h('summary', {}, I18N.t('测算设置')), form);
+    root.appendChild(settings);
+    var help = h('details', { class: 'consumption-method' },
+      h('summary', {}, I18N.t('计算口径与使用说明')),
+      h('p', {}, I18N.t('推算使用量 = 期初实盘 + 实际入库 − 期末实盘 − 已确认报损。盘点调账不重复计入。')),
+      h('p', {}, I18N.t('平均日耗按完整有效周期的总用量 ÷ 总自然天数计算，暂未区分营业日。每天的实际用量可能不同。')),
+      h('p', {}, I18N.t('盘点时间取最终采用记录的提交或最后编辑时间；报损以登记时间近似发生时间。无法确定时间的周期不用于预测。')),
+      h('p', {}, I18N.t('备货缺口按到货等待期、覆盖期和最低库存计算，并按保质期限制目标数量。未扣除待到货订单，请核对订单与包装规格后采购。')),
+      h('p', {}, I18N.t('预测不修改库存账。推算使用量可能包含漏报损耗；批次临期数量是账面提示，需现场核实。'))
+    );
+    root.appendChild(help);
+    var content = h('div', { 'aria-live': 'polite' });
+    root.appendChild(content);
+    var search = h('input', { class: 'search-input', type: 'search', placeholder: I18N.t('搜索品名或分类…'), 'aria-label': I18N.t('搜索品名或分类…') });
+    var list = h('div', { class: 'consumption-list' });
+    var data = null;
+    var activeFilter = 'all';
+    var generation = 0;
+    function number(v) {
+      return v === null || v === undefined ? '—' : Number(v).toLocaleString(I18N.getLang(), { maximumFractionDigits: 1 });
+    }
+    function quantity(v, unit) { return number(v) + (v === null || v === undefined ? '' : ' ' + unit); }
+    function metric(label, value) {
+      return h('div', { class: 'consumption-metric' }, h('span', {}, label), h('strong', {}, value));
+    }
+    function draw() {
+      list.innerHTML = '';
+      var q = search.value.trim().toLowerCase();
+      var visible = data.items.filter(function (row) {
+        return (row.name + ' ' + row.category).toLowerCase().indexOf(q) >= 0 &&
+          (activeFilter === 'all' || (activeFilter === 'urgent' && (row.status === 'shortage' || row.status === 'reorder')) ||
+          (activeFilter === 'review' && row.forecast_issue) || (activeFilter === 'expiry' && row.expiring_qty > 0));
+      });
+      if (!visible.length) { list.appendChild(window.UI.emptyView(I18N.t('没有匹配的库存品'))); }
+      visible.forEach(function (row) {
+        var card = h('article', { class: 'consumption-card consumption-' + row.status },
+          h('div', { class: 'consumption-card-head' }, h('div', {}, h('h2', {}, row.name), h('span', { class: 'consumption-category' }, row.category || I18N.t('未分类'))),
+            h('span', { class: 'consumption-status' }, statusLabels[row.status])),
+          h('div', { class: 'consumption-metrics' },
+            metric(I18N.t('账面库存'), quantity(row.book_stock, row.unit)),
+            metric(I18N.t('最近实盘'), quantity(row.last_count_qty, row.unit)),
+            metric(I18N.t('预计余量'), quantity(row.estimated_qty, row.unit))),
+          h('div', { class: 'consumption-prediction' },
+            metric(I18N.t('平均日耗'), quantity(row.daily_rate, row.unit)),
+            metric(I18N.t('预计可用天数'), number(row.days_remaining))),
+          h('p', { class: 'consumption-meta' }, row.last_count_at ? I18N.t('采用记录：{time}', { time: fmtDateTime(row.last_count_at) }) : I18N.t('尚无有效双人盘点')),
+          h('p', { class: 'consumption-meta' }, I18N.t('有效周期 {valid} / {total}', { valid: row.valid_periods, total: row.period_count }))
+        );
+        if (row.forecast_issue) {
+          card.appendChild(h('p', { class: 'consumption-warning' }, issueLabels[row.forecast_issue] || row.forecast_issue));
+        }
+        if (row.daily_shortage) { card.appendChild(h('p', { class: 'consumption-warning' }, I18N.t('现场反馈优先，请核实余量并安排补货。'))); }
+        if (row.expiring_qty > 0) {
+          card.appendChild(h('p', { class: 'consumption-warning' }, I18N.t('3 天内到期及已过期账面数量：{qty}', { qty: quantity(row.expiring_qty, row.unit) })));
+        }
+        if (row.replenishment_gap !== null) {
+          card.appendChild(h('div', { class: 'consumption-gap' }, I18N.t('备货缺口（未扣在途）'), h('strong', {}, quantity(row.replenishment_gap, row.unit))));
+        }
+        if (row.ordered_qty > 0) {
+          card.appendChild(h('p', { class: 'consumption-warning' }, I18N.t('待到货 {qty}，请先核对订单，避免重复采购。', { qty: quantity(row.ordered_qty, row.unit) })));
+        }
+        var detail = h('details', { class: 'consumption-detail' }, h('summary', {}, I18N.t('消耗趋势与计算依据')));
+        detail.appendChild(h('p', { class: 'consumption-meta' }, I18N.t('有效周期使用量 {qty}，覆盖 {days} 天。', { qty: quantity(row.consumption, row.unit), days: number(row.sample_days) })));
+        if (row.estimated_qty !== null) {
+          detail.appendChild(h('p', { class: 'consumption-meta' }, I18N.t('自最近实盘后：入库 {received}，报损 {waste}，经过约 {days} 天。', {
+            received: quantity(row.received_since_count, row.unit), waste: quantity(row.waste_since_count, row.unit), days: number(row.count_age_days)
+          })));
+        }
+        if (!row.periods.length) { detail.appendChild(h('p', { class: 'consumption-meta' }, I18N.t('统计范围内还没有完整盘点周期。'))); }
+        var maxRate = Math.max.apply(null, [1].concat(row.periods.map(function (p) { return p.exclusion ? 0 : p.daily_rate || 0; })));
+        row.periods.forEach(function (p) {
+          var period = h('div', { class: 'consumption-period' + (p.exclusion ? ' excluded' : '') },
+            h('strong', {}, fmtDateShort(p.start_at) + ' → ' + fmtDateShort(p.end_at)),
+            h('p', {}, I18N.t('推算使用 {qty} · 日均 {rate}', { qty: quantity(p.consumption, row.unit), rate: number(p.daily_rate) })),
+            h('div', { class: 'consumption-trend', 'aria-hidden': 'true' }, h('div', { style: 'width:' + (p.exclusion ? 0 : Math.max(0, p.daily_rate || 0) / maxRate * 100) + '%' })),
+            h('p', { class: 'consumption-meta' }, I18N.t('{opening} + 入库 {received} − 实盘 {closing} − 报损 {waste} = {used}', {
+              opening: p.opening_qty, received: p.received, closing: p.closing_qty, waste: p.waste, used: p.consumption
+            })),
+            h('p', { class: 'consumption-meta' }, I18N.t('确认结果 #{first} → #{second} · {days} 天', { first: p.opening_comparison_id, second: p.closing_comparison_id, days: number(p.days) }))
+          );
+          if (p.exclusion) { period.appendChild(h('p', { class: 'consumption-warning' }, I18N.t('未纳入预测：{reason}', { reason: issueLabels[p.exclusion] || p.exclusion }))); }
+          detail.appendChild(period);
+        });
+        card.appendChild(detail);
+        list.appendChild(card);
+      });
+    }
+    function load() {
+      var requestGeneration = ++generation;
+      apply.disabled = true;
+      content.innerHTML = '';
+      content.appendChild(window.UI.loadingView());
+      API.consumption(Number(windowSelect.value), Number(lead.value), Number(coverage.value)).then(function (result) {
+        if (requestGeneration !== generation) { return; }
+        data = result;
+        content.innerHTML = '';
+        content.appendChild(h('p', { class: 'consumption-meta' }, I18N.t('测算时间：{time}', { time: fmtDateTime(data.as_of) })));
+        content.appendChild(h('p', { class: 'consumption-meta' }, I18N.t('近 {days} 天 · 等待 {lead} 天 · 到货后覆盖 {coverage} 天', { days: data.days, lead: data.lead_days, coverage: data.coverage_days })));
+        var filters = [
+          { key: 'all', label: I18N.t('全部'), count: data.items.length },
+          { key: 'urgent', label: I18N.t('优先补货'), count: data.items.filter(function (r) { return r.status === 'shortage' || r.status === 'reorder'; }).length },
+          { key: 'review', label: I18N.t('待核查'), count: data.items.filter(function (r) { return r.forecast_issue; }).length },
+          { key: 'expiry', label: I18N.t('临期核实'), count: data.items.filter(function (r) { return r.expiring_qty > 0; }).length }
+        ];
+        var filterBar = h('div', { class: 'consumption-filters', 'aria-label': I18N.t('筛选库存品') });
+        filters.forEach(function (f) {
+          var button = h('button', { type: 'button', 'aria-pressed': String(activeFilter === f.key) }, h('strong', {}, String(f.count)), h('span', {}, f.label));
+          button.addEventListener('click', function () {
+            activeFilter = f.key;
+            Array.prototype.forEach.call(filterBar.children, function (b) { b.setAttribute('aria-pressed', String(b === button)); });
+            draw();
+          });
+          filterBar.appendChild(button);
+        });
+        content.appendChild(filterBar);
+        content.appendChild(search);
+        content.appendChild(list);
+        draw();
+      }).catch(function (err) {
+        if (requestGeneration !== generation || (err && err.silent)) { return; }
+        content.innerHTML = '';
+        content.appendChild(window.UI.errorView(err.message || I18N.t('加载失败'), load));
+      }).then(function () { if (requestGeneration === generation) { apply.disabled = false; } });
+    }
+    search.addEventListener('input', function () { if (data) { draw(); } });
+    form.addEventListener('submit', function (event) { event.preventDefault(); load(); });
+    var actions = h('div', { class: 'consumption-actions' });
+    [
+      { label: I18N.t('查看采购订单'), to: '#/purchase' },
+      { label: I18N.t('盘点管理'), to: '#/count-review' },
+      { label: I18N.t('库存查询'), to: '#/stock' }
+    ].forEach(function (action) {
+      var button = h('button', { class: 'btn btn-ghost', type: 'button' }, action.label);
+      button.addEventListener('click', function () { location.hash = action.to; });
+      actions.appendChild(button);
+    });
+    root.appendChild(actions);
+    load();
     return { root: root };
   }
 
@@ -3185,6 +3370,7 @@
     '/purchase': { render: renderPurchase, roles: ['manager', 'admin'] },
     '/items': { render: renderItems, roles: ['manager', 'admin'] },
     '/stock': { render: renderStock },
+    '/consumption': { render: renderConsumption, roles: ['manager', 'admin'] },
     '/users': { render: renderUsers, roles: ['admin'] }
   };
 

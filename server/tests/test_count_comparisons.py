@@ -1,6 +1,26 @@
 """双人独立盘点配对、差异处置、缺项与权限。"""
 
 
+def test_receipt_after_count_cannot_be_erased_by_fresh_preview(
+    client, staff_token, staff_b_token, manager_token, auth, make_item, make_batch
+):
+    item = make_item(name="延迟确认保护")
+    make_batch(item.id, 50, "2099-01-01")
+    first = _count(client, auth, staff_token, [{"item_id": item.id, "qty": 40}])
+    second = _count(client, auth, staff_b_token, [{"item_id": item.id, "qty": 40}])
+    received = client.post("/api/stock/receive", headers=auth(manager_token), json={
+        "items": [{"item_id": item.id, "qty": 20, "expiry_date": "2099-01-01"}]
+    })
+    assert received.status_code == 201
+    preview = _preview(client, auth, manager_token, first, second).json()
+    result = _confirm(client, auth, manager_token, preview, "no_difference")
+    assert result.status_code == 409
+    assert result.json()["detail"]["code"] == "count_observation_stale"
+    assert client.get("/api/stock", headers=auth(manager_token)).json()[0]["stock"] == 70
+    # Returning the pair for a recount remains possible, and does not change stock.
+    assert _confirm(client, auth, manager_token, preview, "recount_required", "到货后重新盘点").status_code == 201
+
+
 def _count(client, auth, token, entries):
     response = client.post("/api/counts", json={"count_type": "weekly", "entries": entries}, headers=auth(token))
     assert response.status_code == 201

@@ -5,6 +5,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from .quantity import Quantity, QuantityInput
+
 PIN_RE = re.compile(r"^\d{4,6}$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -123,7 +125,7 @@ class ItemCreate(BaseModel):
     category: str = Field(default="", max_length=64)
     unit: str = Field(default="个", max_length=16)
     shelf_life_days: int = Field(default=7, ge=1)
-    min_stock: int = Field(default=0, ge=0)
+    min_stock: QuantityInput = Field(default=0, ge=0)
     daily_count_enabled: bool = True
     weekly_count_enabled: bool = True
     sort_order: int = 0
@@ -134,7 +136,7 @@ class ItemUpdate(BaseModel):
     category: Optional[str] = Field(default=None, max_length=64)
     unit: Optional[str] = Field(default=None, max_length=16)
     shelf_life_days: Optional[int] = Field(default=None, ge=1)
-    min_stock: Optional[int] = Field(default=None, ge=0)
+    min_stock: Optional[QuantityInput] = Field(default=None, ge=0)
     daily_count_enabled: Optional[bool] = None
     weekly_count_enabled: Optional[bool] = None
     active: Optional[bool] = None
@@ -147,14 +149,14 @@ class ItemOut(BaseModel):
     category: str
     unit: str
     shelf_life_days: int
-    min_stock: int
+    min_stock: Quantity
     daily_count_enabled: bool
     weekly_count_enabled: bool
     active: bool
     sort_order: int
-    stock: int  # 实时库存（批次剩余之和）
+    stock: Quantity  # 实时库存（批次剩余之和）
     last_count_at: Optional[datetime] = None
-    last_count_qty: Optional[int] = None
+    last_count_qty: Optional[Quantity] = None
     last_count_type: Optional[str] = None
     last_count_enough: Optional[bool] = None
 
@@ -162,8 +164,8 @@ class ItemOut(BaseModel):
 class BatchOut(BaseModel):
     id: int
     item_id: int
-    qty: int
-    initial_qty: int
+    qty: Quantity
+    initial_qty: Quantity
     expiry_date: str
     received_at: datetime
     source: str
@@ -175,7 +177,7 @@ class StockMovementOut(BaseModel):
     id: int
     item_id: int
     batch_id: int
-    delta: int
+    delta: Quantity
     operation: str
     reference_type: str
     reference_id: Optional[int]
@@ -190,7 +192,7 @@ class StockItem(BaseModel):
     category: str
     unit: str
     shelf_life_days: int
-    min_stock: int
+    min_stock: Quantity
     daily_count_enabled: bool
     weekly_count_enabled: bool
     active: bool
@@ -198,14 +200,14 @@ class StockItem(BaseModel):
 
 class StockEntry(BaseModel):
     item: StockItem
-    stock: int
+    stock: Quantity
     nearest_expiry: Optional[str]
     batch_count: int
 
 
 class StockReceiveItem(BaseModel):
     item_id: int
-    qty: int = Field(ge=1)
+    qty: QuantityInput = Field(ge=0.1)
     expiry_date: str
 
     @field_validator("expiry_date")
@@ -224,7 +226,7 @@ class ExpiryEntry(BaseModel):
     item_id: int
     item_name: str
     unit: str
-    qty: int
+    qty: Quantity
     expiry_date: str
     days_to_expiry: int
 
@@ -233,7 +235,7 @@ class ExpiryEntry(BaseModel):
 
 class CountEntryIn(BaseModel):
     item_id: int
-    qty: Optional[int] = Field(default=None, ge=0)
+    qty: Optional[QuantityInput] = Field(default=None, ge=0)
     enough: Optional[bool] = None
 
 
@@ -251,8 +253,8 @@ class CountEditIn(BaseModel):
 
 class CountReviewEntryIn(BaseModel):
     item_id: int
-    qty: int = Field(ge=0)
-    expected_current_qty: Optional[int] = Field(default=None, ge=0)
+    qty: QuantityInput = Field(ge=0)
+    expected_current_qty: Optional[QuantityInput] = Field(default=None, ge=0)
 
 
 class CountVerifyIn(BaseModel):
@@ -266,14 +268,14 @@ class CountEntryOut(BaseModel):
     item_id: int
     item_name: str
     unit: str
-    expected_qty: int
-    qty_counted: int
-    diff: int
+    expected_qty: Quantity
+    qty_counted: Quantity
+    diff: Quantity
     is_enough: Optional[bool]
-    reported_qty: Optional[int]
-    reviewed_qty: Optional[int]
-    review_diff: Optional[int]
-    current_qty: int
+    reported_qty: Optional[Quantity]
+    reviewed_qty: Optional[Quantity]
+    review_diff: Optional[Quantity]
+    current_qty: Quantity
 
 
 class CountOut(BaseModel):
@@ -320,7 +322,7 @@ class CountDetailOut(BaseModel):
 
 class WasteCreate(BaseModel):
     item_id: int
-    qty: int = Field(ge=1)
+    qty: QuantityInput = Field(ge=0.1)
     reason: str = Field(min_length=1, max_length=64)
     description: Optional[str] = Field(default=None, max_length=500)
     photo_data: Optional[str] = None
@@ -334,7 +336,7 @@ class WasteOut(BaseModel):
     unit: str
     batch_id: Optional[int]
     batch_expiry_date: Optional[str]
-    qty: int
+    qty: Quantity
     reason: str
     description: Optional[str]
     has_photo: bool
@@ -350,7 +352,7 @@ class WasteOut(BaseModel):
 
 class PurchaseItemIn(BaseModel):
     item_id: int
-    qty: int = Field(ge=1)
+    qty: QuantityInput = Field(ge=0.1)
 
 
 class PurchaseCreate(BaseModel):
@@ -363,7 +365,7 @@ class PurchaseLineOut(BaseModel):
     item_id: int
     item_name: str
     unit: str
-    qty: int
+    qty: Quantity
 
 
 class PurchaseOut(BaseModel):

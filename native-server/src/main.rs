@@ -2,6 +2,7 @@ mod api;
 mod auth;
 mod backup;
 mod db;
+mod quantity;
 
 use anyhow::{Context, Result, bail};
 use axum_server::tls_rustls::RustlsConfig;

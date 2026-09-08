@@ -1,3 +1,4 @@
+use crate::quantity::Quantity;
 use axum::{
     Json, Router,
     body::{Body, to_bytes},
@@ -106,6 +107,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/stock/receive", post(receive_stock))
         .route("/api/expiry", get(expiry))
         .route("/api/dashboard", get(dashboard))
+        .route("/api/consumption", get(consumption))
         .route("/api/purchases", get(list_purchases).post(create_purchase))
         .route("/api/purchases/{id}/receive", post(receive_purchase))
         .route("/api/purchases/{id}/cancel", post(cancel_purchase))
@@ -510,7 +512,7 @@ fn item_exists(db: &Connection, id: i64) -> rusqlite::Result<bool> {
         .optional()?
         .is_some())
 }
-fn item_stock(db: &Connection, id: i64) -> rusqlite::Result<i64> {
+fn item_stock(db: &Connection, id: i64) -> rusqlite::Result<Quantity> {
     db.query_row(
         "SELECT coalesce(sum(qty),0) FROM batches WHERE item_id=?1",
         [id],
@@ -520,12 +522,17 @@ fn item_stock(db: &Connection, id: i64) -> rusqlite::Result<i64> {
 fn item_last_count(
     db: &Connection,
     id: i64,
-) -> rusqlite::Result<(Option<String>, Option<i64>, Option<String>, Option<bool>)> {
+) -> rusqlite::Result<(
+    Option<String>,
+    Option<Quantity>,
+    Option<String>,
+    Option<bool>,
+)> {
     let last = db
         .query_row(
             "SELECT c.created_at,CASE WHEN c.count_type='daily' THEN e.reported_qty ELSE coalesce(e.reviewed_qty,e.qty_counted) END,c.count_type,e.is_enough FROM count_entries e JOIN count_sessions c ON c.id=e.session_id WHERE e.item_id=?1 AND ((c.count_type='daily' AND c.status='completed') OR (c.count_type='weekly' AND c.status='verified')) ORDER BY datetime(c.created_at) DESC,c.id DESC,e.id DESC LIMIT 1",
             [id],
-            |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<i64>>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<bool>>(3)?)),
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<Quantity>>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<bool>>(3)?)),
         )
         .optional()?;
     Ok(match last {
@@ -540,7 +547,7 @@ fn item_last_count(
     })
 }
 fn item_json(db: &Connection, id: i64) -> rusqlite::Result<Value> {
-    db.query_row("SELECT id,name,category,unit,shelf_life_days,min_stock,daily_count_enabled,weekly_count_enabled,active,sort_order FROM items WHERE id=?1",[id],|r|{let last=item_last_count(db,id)?;Ok(json!({"id":r.get::<_,i64>(0)?,"name":r.get::<_,String>(1)?,"category":r.get::<_,String>(2)?,"unit":r.get::<_,String>(3)?,"shelf_life_days":r.get::<_,i64>(4)?,"min_stock":r.get::<_,i64>(5)?,"daily_count_enabled":r.get::<_,bool>(6)?,"weekly_count_enabled":r.get::<_,bool>(7)?,"active":r.get::<_,bool>(8)?,"sort_order":r.get::<_,i64>(9)?,"stock":item_stock(db,id)?,"last_count_at":last.0,"last_count_qty":last.1,"last_count_type":last.2,"last_count_enough":last.3}))})
+    db.query_row("SELECT id,name,category,unit,shelf_life_days,min_stock,daily_count_enabled,weekly_count_enabled,active,sort_order FROM items WHERE id=?1",[id],|r|{let last=item_last_count(db,id)?;Ok(json!({"id":r.get::<_,i64>(0)?,"name":r.get::<_,String>(1)?,"category":r.get::<_,String>(2)?,"unit":r.get::<_,String>(3)?,"shelf_life_days":r.get::<_,i64>(4)?,"min_stock":r.get::<_,Quantity>(5)?,"daily_count_enabled":r.get::<_,bool>(6)?,"weekly_count_enabled":r.get::<_,bool>(7)?,"active":r.get::<_,bool>(8)?,"sort_order":r.get::<_,i64>(9)?,"stock":item_stock(db,id)?,"last_count_at":last.0,"last_count_qty":last.1,"last_count_type":last.2,"last_count_enough":last.3}))})
 }
 
 #[derive(Deserialize, Default)]
@@ -575,7 +582,7 @@ struct ItemCreate {
     category: Option<String>,
     unit: Option<String>,
     shelf_life_days: Option<i64>,
-    min_stock: Option<i64>,
+    min_stock: Option<Quantity>,
     daily_count_enabled: Option<bool>,
     weekly_count_enabled: Option<bool>,
     sort_order: Option<i64>,
@@ -589,7 +596,7 @@ async fn create_item(
     current_user(&db, &s.secret, &headers, Some("manager"), false)?;
     if p.name.trim().is_empty()
         || p.shelf_life_days.unwrap_or(7) < 1
-        || p.min_stock.unwrap_or(0) < 0
+        || p.min_stock.unwrap_or_default() < 0
     {
         return Err(ApiError::bad("库存品资料格式错误"));
     }
@@ -602,7 +609,7 @@ async fn create_item(
     {
         return Err(ApiError::conflict("库存品名称已存在"));
     }
-    db.execute("INSERT INTO items(name,category,unit,shelf_life_days,min_stock,daily_count_enabled,weekly_count_enabled,active,sort_order,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,1,?8,?9)",params![p.name,p.category.unwrap_or_default(),p.unit.unwrap_or_else(||"个".into()),p.shelf_life_days.unwrap_or(7),p.min_stock.unwrap_or(0),p.daily_count_enabled.unwrap_or(true),p.weekly_count_enabled.unwrap_or(true),p.sort_order.unwrap_or(0),now()])?;
+    db.execute("INSERT INTO items(name,category,unit,shelf_life_days,min_stock,daily_count_enabled,weekly_count_enabled,active,sort_order,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,1,?8,?9)",params![p.name,p.category.unwrap_or_default(),p.unit.unwrap_or_else(||"个".into()),p.shelf_life_days.unwrap_or(7),p.min_stock.unwrap_or_default(),p.daily_count_enabled.unwrap_or(true),p.weekly_count_enabled.unwrap_or(true),p.sort_order.unwrap_or(0),now()])?;
     let id = db.last_insert_rowid();
     Ok((StatusCode::CREATED, Json(item_json(&db, id)?)))
 }
@@ -612,7 +619,7 @@ struct ItemUpdate {
     category: Option<String>,
     unit: Option<String>,
     shelf_life_days: Option<i64>,
-    min_stock: Option<i64>,
+    min_stock: Option<Quantity>,
     daily_count_enabled: Option<bool>,
     weekly_count_enabled: Option<bool>,
     active: Option<bool>,
@@ -664,7 +671,7 @@ async fn item_batches(
     }
     let today = store_today();
     let mut st=db.prepare("SELECT id,item_id,qty,initial_qty,expiry_date,received_at,source,note FROM batches WHERE item_id=?1 ORDER BY expiry_date,id")?;
-    let rows=st.query_map([id],|r|{let expiry:String=r.get(4)?;let days=NaiveDate::parse_from_str(&expiry,"%Y-%m-%d").map(|d|(d-today).num_days()).unwrap_or(0);Ok(json!({"id":r.get::<_,i64>(0)?,"item_id":r.get::<_,i64>(1)?,"qty":r.get::<_,i64>(2)?,"initial_qty":r.get::<_,i64>(3)?,"expiry_date":expiry,"received_at":out_dt(r.get(5)?),"source":r.get::<_,String>(6)?,"note":r.get::<_,Option<String>>(7)?,"days_to_expiry":days}))})?.collect::<Result<Vec<_>,_>>()?;
+    let rows=st.query_map([id],|r|{let expiry:String=r.get(4)?;let days=NaiveDate::parse_from_str(&expiry,"%Y-%m-%d").map(|d|(d-today).num_days()).unwrap_or(0);Ok(json!({"id":r.get::<_,i64>(0)?,"item_id":r.get::<_,i64>(1)?,"qty":r.get::<_,Quantity>(2)?,"initial_qty":r.get::<_,Quantity>(3)?,"expiry_date":expiry,"received_at":out_dt(r.get(5)?),"source":r.get::<_,String>(6)?,"note":r.get::<_,Option<String>>(7)?,"days_to_expiry":days}))})?.collect::<Result<Vec<_>,_>>()?;
     Ok(Json(Value::Array(rows)))
 }
 async fn item_movements(
@@ -678,7 +685,7 @@ async fn item_movements(
         return Err(ApiError::not_found("库存品不存在"));
     }
     let mut st=db.prepare("SELECT m.id,m.item_id,m.batch_id,m.delta,m.operation,m.reference_type,m.reference_id,m.actor_id,u.display_name,m.created_at FROM stock_movements m LEFT JOIN users u ON u.id=m.actor_id WHERE m.item_id=?1 ORDER BY m.id DESC")?;
-    let rows=st.query_map([id],|r|Ok(json!({"id":r.get::<_,i64>(0)?,"item_id":r.get::<_,i64>(1)?,"batch_id":r.get::<_,i64>(2)?,"delta":r.get::<_,i64>(3)?,"operation":r.get::<_,String>(4)?,"reference_type":r.get::<_,String>(5)?,"reference_id":r.get::<_,Option<i64>>(6)?,"actor_id":r.get::<_,i64>(7)?,"actor_name":r.get::<_,Option<String>>(8)?.unwrap_or_else(||"?".into()),"created_at":out_dt(r.get(9)?)})))?.collect::<Result<Vec<_>,_>>()?;
+    let rows=st.query_map([id],|r|Ok(json!({"id":r.get::<_,i64>(0)?,"item_id":r.get::<_,i64>(1)?,"batch_id":r.get::<_,i64>(2)?,"delta":r.get::<_,Quantity>(3)?,"operation":r.get::<_,String>(4)?,"reference_type":r.get::<_,String>(5)?,"reference_id":r.get::<_,Option<i64>>(6)?,"actor_id":r.get::<_,i64>(7)?,"actor_name":r.get::<_,Option<String>>(8)?.unwrap_or_else(||"?".into()),"created_at":out_dt(r.get(9)?)})))?.collect::<Result<Vec<_>,_>>()?;
     Ok(Json(Value::Array(rows)))
 }
 
@@ -686,13 +693,13 @@ async fn stock(State(s): State<AppState>, headers: HeaderMap) -> Result<Json<Val
     let db = read_db(&s)?;
     current_user(&db, &s.secret, &headers, Some("staff"), false)?;
     let mut st=db.prepare("SELECT id,name,category,unit,shelf_life_days,min_stock,daily_count_enabled,weekly_count_enabled,active FROM items WHERE active=1 ORDER BY sort_order,id")?;
-    let rows=st.query_map([],|r|{let id:i64=r.get(0)?;let (qty,nearest,count):(i64,Option<String>,i64)=db.query_row("SELECT coalesce(sum(qty),0),min(CASE WHEN qty>0 THEN expiry_date END),coalesce(sum(CASE WHEN qty>0 THEN 1 ELSE 0 END),0) FROM batches WHERE item_id=?1",[id],|x|Ok((x.get(0)?,x.get(1)?,x.get(2)?)))?;Ok(json!({"item":{"id":id,"name":r.get::<_,String>(1)?,"category":r.get::<_,String>(2)?,"unit":r.get::<_,String>(3)?,"shelf_life_days":r.get::<_,i64>(4)?,"min_stock":r.get::<_,i64>(5)?,"daily_count_enabled":r.get::<_,bool>(6)?,"weekly_count_enabled":r.get::<_,bool>(7)?,"active":r.get::<_,bool>(8)?},"stock":qty,"nearest_expiry":nearest,"batch_count":count}))})?.collect::<Result<Vec<_>,_>>()?;
+    let rows=st.query_map([],|r|{let id:i64=r.get(0)?;let (qty,nearest,count):(Quantity,Option<String>,i64)=db.query_row("SELECT coalesce(sum(qty),0),min(CASE WHEN qty>0 THEN expiry_date END),coalesce(sum(CASE WHEN qty>0 THEN 1 ELSE 0 END),0) FROM batches WHERE item_id=?1",[id],|x|Ok((x.get(0)?,x.get(1)?,x.get(2)?)))?;Ok(json!({"item":{"id":id,"name":r.get::<_,String>(1)?,"category":r.get::<_,String>(2)?,"unit":r.get::<_,String>(3)?,"shelf_life_days":r.get::<_,i64>(4)?,"min_stock":r.get::<_,Quantity>(5)?,"daily_count_enabled":r.get::<_,bool>(6)?,"weekly_count_enabled":r.get::<_,bool>(7)?,"active":r.get::<_,bool>(8)?},"stock":qty,"nearest_expiry":nearest,"batch_count":count}))})?.collect::<Result<Vec<_>,_>>()?;
     Ok(Json(Value::Array(rows)))
 }
 #[derive(Deserialize)]
 struct StockReceiveLine {
     item_id: i64,
-    qty: i64,
+    qty: Quantity,
     expiry_date: String,
 }
 #[derive(Deserialize)]
@@ -718,7 +725,7 @@ async fn receive_stock(
     }
     let mut seen = HashSet::new();
     for line in &p.items {
-        if line.qty < 1 {
+        if line.qty <= 0 {
             return Err(ApiError::bad("入库数量必须大于 0"));
         }
         if !seen.insert(line.item_id) {
@@ -770,8 +777,8 @@ async fn receive_stock(
                 Ok(json!({
                     "id": r.get::<_, i64>(0)?,
                     "item_id": r.get::<_, i64>(1)?,
-                    "qty": r.get::<_, i64>(2)?,
-                    "initial_qty": r.get::<_, i64>(3)?,
+                    "qty": r.get::<_, Quantity>(2)?,
+                    "initial_qty": r.get::<_, Quantity>(3)?,
                     "expiry_date": expiry,
                     "received_at": out_dt(r.get(5)?),
                     "source": r.get::<_, String>(6)?,
@@ -804,9 +811,68 @@ async fn expiry(
         .format("%Y-%m-%d")
         .to_string();
     let mut st=db.prepare("SELECT b.id,b.item_id,i.name,i.unit,b.qty,b.expiry_date FROM batches b JOIN items i ON i.id=b.item_id WHERE b.qty>0 AND b.expiry_date<=?1 ORDER BY b.expiry_date,b.id")?;
-    let rows=st.query_map([cutoff],|r|{let e:String=r.get(5)?;let d=NaiveDate::parse_from_str(&e,"%Y-%m-%d").map(|x|(x-today).num_days()).unwrap_or(0);Ok(json!({"batch_id":r.get::<_,i64>(0)?,"item_id":r.get::<_,i64>(1)?,"item_name":r.get::<_,String>(2)?,"unit":r.get::<_,String>(3)?,"qty":r.get::<_,i64>(4)?,"expiry_date":e,"days_to_expiry":d}))})?.collect::<Result<Vec<_>,_>>()?;
+    let rows=st.query_map([cutoff],|r|{let e:String=r.get(5)?;let d=NaiveDate::parse_from_str(&e,"%Y-%m-%d").map(|x|(x-today).num_days()).unwrap_or(0);Ok(json!({"batch_id":r.get::<_,i64>(0)?,"item_id":r.get::<_,i64>(1)?,"item_name":r.get::<_,String>(2)?,"unit":r.get::<_,String>(3)?,"qty":r.get::<_,Quantity>(4)?,"expiry_date":e,"days_to_expiry":d}))})?.collect::<Result<Vec<_>,_>>()?;
     Ok(Json(Value::Array(rows)))
 }
+#[derive(Deserialize)]
+struct ConsumptionQuery {
+    #[serde(default = "consumption_window")]
+    days: i64,
+    #[serde(default = "consumption_lead")]
+    lead_days: i64,
+    #[serde(default = "consumption_coverage")]
+    coverage_days: i64,
+}
+fn consumption_window() -> i64 {
+    56
+}
+fn consumption_lead() -> i64 {
+    2
+}
+fn consumption_coverage() -> i64 {
+    7
+}
+
+async fn consumption(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<ConsumptionQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let db = read_db(&s)?;
+    current_user(&db, &s.secret, &headers, Some("manager"), false)?;
+    if !(7..=180).contains(&q.days)
+        || !(0..=30).contains(&q.lead_days)
+        || !(1..=30).contains(&q.coverage_days)
+    {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "看板参数超出范围",
+        ));
+    }
+    let as_of = now();
+    let mut statement = db.prepare(include_str!("../../server/app/consumption.sql"))?;
+    let rows = statement
+        .query_map(
+            rusqlite::named_params! {
+                ":as_of": &as_of, ":days": q.days, ":lead_days": q.lead_days,
+                ":coverage_days": q.coverage_days,
+            },
+            |row| row.get::<_, String>(0),
+        )?
+        .collect::<Result<Vec<_>, _>>()?;
+    let items = rows
+        .into_iter()
+        .map(|row| {
+            serde_json::from_str::<Value>(&row)
+                .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "统计数据错误"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Json(
+        json!({"as_of": as_of.replace(' ', "T") + "Z", "days": q.days,
+        "lead_days": q.lead_days, "coverage_days": q.coverage_days, "items": items}),
+    ))
+}
+
 async fn dashboard(State(s): State<AppState>, headers: HeaderMap) -> Result<Json<Value>, ApiError> {
     let db = read_db(&s)?;
     let u = current_user(&db, &s.secret, &headers, Some("staff"), false)?;
@@ -848,7 +914,7 @@ async fn dashboard(State(s): State<AppState>, headers: HeaderMap) -> Result<Json
 fn purchase_json(db: &Connection, id: i64) -> rusqlite::Result<Value> {
     let (status,note,created_by,creator,created_at,received_at):(String,Option<String>,i64,String,String,Option<String>)=db.query_row("SELECT p.status,p.note,p.created_by,coalesce(u.display_name,''),p.created_at,p.received_at FROM purchases p LEFT JOIN users u ON u.id=p.created_by WHERE p.id=?1",[id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?)))?;
     let mut st=db.prepare("SELECT pi.id,pi.item_id,coalesce(i.name,'?'),coalesce(i.unit,''),pi.qty FROM purchase_items pi LEFT JOIN items i ON i.id=pi.item_id WHERE pi.purchase_id=?1 ORDER BY pi.id")?;
-    let items=st.query_map([id],|r|Ok(json!({"id":r.get::<_,i64>(0)?,"item_id":r.get::<_,i64>(1)?,"item_name":r.get::<_,String>(2)?,"unit":r.get::<_,String>(3)?,"qty":r.get::<_,i64>(4)?})))?.collect::<Result<Vec<_>,_>>()?;
+    let items=st.query_map([id],|r|Ok(json!({"id":r.get::<_,i64>(0)?,"item_id":r.get::<_,i64>(1)?,"item_name":r.get::<_,String>(2)?,"unit":r.get::<_,String>(3)?,"qty":r.get::<_,Quantity>(4)?})))?.collect::<Result<Vec<_>,_>>()?;
     Ok(
         json!({"id":id,"status":status,"note":note,"created_by":created_by,"created_by_name":creator,"created_at":out_dt(created_at),"received_at":received_at.map(out_dt),"items":items}),
     )
@@ -856,7 +922,7 @@ fn purchase_json(db: &Connection, id: i64) -> rusqlite::Result<Value> {
 #[derive(Deserialize)]
 struct PurchaseLineIn {
     item_id: i64,
-    qty: i64,
+    qty: Quantity,
 }
 #[derive(Deserialize)]
 struct PurchaseCreateIn {
@@ -875,7 +941,7 @@ async fn create_purchase(
     }
     let mut seen = HashSet::new();
     for line in &p.items {
-        if line.qty < 1 {
+        if line.qty <= 0 {
             return Err(ApiError::bad("采购数量必须大于 0"));
         }
         if !seen.insert(line.item_id) {
@@ -958,7 +1024,7 @@ async fn receive_purchase(
             Ok((
                 r.get::<_, i64>(0)?,
                 r.get::<_, i64>(1)?,
-                r.get::<_, i64>(2)?,
+                r.get::<_, Quantity>(2)?,
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -1020,7 +1086,7 @@ fn movement(
     db: &Connection,
     item: i64,
     batch: i64,
-    delta: i64,
+    delta: Quantity,
     op: &str,
     reference: &str,
     ref_id: Option<i64>,
@@ -1032,7 +1098,7 @@ fn movement(
 fn deduct_fefo(
     db: &Connection,
     item: i64,
-    qty: i64,
+    qty: Quantity,
     batch_id: Option<i64>,
     actor: i64,
     op: &str,
@@ -1043,7 +1109,7 @@ fn deduct_fefo(
         return Err(ApiError::bad("扣减数量必须大于 0"));
     }
     if let Some(batch) = batch_id {
-        let found: Option<(i64, i64)> = db
+        let found: Option<(i64, Quantity)> = db
             .query_row(
                 "SELECT item_id,qty FROM batches WHERE id=?1",
                 [batch],
@@ -1072,10 +1138,12 @@ fn deduct_fefo(
     let mut st = db
         .prepare("SELECT id,qty FROM batches WHERE item_id=?1 AND qty>0 ORDER BY expiry_date,id")?;
     let batches = st
-        .query_map([item], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))?
+        .query_map([item], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, Quantity>(1)?))
+        })?
         .collect::<Result<Vec<_>, _>>()?;
     drop(st);
-    if batches.iter().map(|x| x.1).sum::<i64>() < qty {
+    if batches.iter().map(|x| x.1).sum::<Quantity>() < qty {
         return Err(ApiError::bad("库存不足，无法扣减"));
     }
     let mut remaining = qty;
@@ -1098,12 +1166,12 @@ fn deduct_fefo(
 }
 
 fn waste_json(db: &Connection, id: i64) -> rusqlite::Result<Value> {
-    db.query_row("SELECT w.id,w.item_id,coalesce(i.name,'?'),coalesce(i.unit,''),w.batch_id,b.expiry_date,w.qty,w.reason,w.description,w.photo_base64 IS NOT NULL,w.status,w.reported_by,coalesce(u.display_name,''),w.reported_at,w.confirmed_by,w.confirmed_at FROM waste_records w LEFT JOIN items i ON i.id=w.item_id LEFT JOIN batches b ON b.id=w.batch_id LEFT JOIN users u ON u.id=w.reported_by WHERE w.id=?1",[id],|r|Ok(json!({"id":r.get::<_,i64>(0)?,"item_id":r.get::<_,i64>(1)?,"item_name":r.get::<_,String>(2)?,"unit":r.get::<_,String>(3)?,"batch_id":r.get::<_,Option<i64>>(4)?,"batch_expiry_date":r.get::<_,Option<String>>(5)?,"qty":r.get::<_,i64>(6)?,"reason":r.get::<_,String>(7)?,"description":r.get::<_,Option<String>>(8)?,"has_photo":r.get::<_,bool>(9)?,"status":r.get::<_,String>(10)?,"reported_by":r.get::<_,i64>(11)?,"reported_by_name":r.get::<_,String>(12)?,"reported_at":out_dt(r.get(13)?),"confirmed_by":r.get::<_,Option<i64>>(14)?,"confirmed_at":r.get::<_,Option<String>>(15)?.map(out_dt)})))
+    db.query_row("SELECT w.id,w.item_id,coalesce(i.name,'?'),coalesce(i.unit,''),w.batch_id,b.expiry_date,w.qty,w.reason,w.description,w.photo_base64 IS NOT NULL,w.status,w.reported_by,coalesce(u.display_name,''),w.reported_at,w.confirmed_by,w.confirmed_at FROM waste_records w LEFT JOIN items i ON i.id=w.item_id LEFT JOIN batches b ON b.id=w.batch_id LEFT JOIN users u ON u.id=w.reported_by WHERE w.id=?1",[id],|r|Ok(json!({"id":r.get::<_,i64>(0)?,"item_id":r.get::<_,i64>(1)?,"item_name":r.get::<_,String>(2)?,"unit":r.get::<_,String>(3)?,"batch_id":r.get::<_,Option<i64>>(4)?,"batch_expiry_date":r.get::<_,Option<String>>(5)?,"qty":r.get::<_,Quantity>(6)?,"reason":r.get::<_,String>(7)?,"description":r.get::<_,Option<String>>(8)?,"has_photo":r.get::<_,bool>(9)?,"status":r.get::<_,String>(10)?,"reported_by":r.get::<_,i64>(11)?,"reported_by_name":r.get::<_,String>(12)?,"reported_at":out_dt(r.get(13)?),"confirmed_by":r.get::<_,Option<i64>>(14)?,"confirmed_at":r.get::<_,Option<String>>(15)?.map(out_dt)})))
 }
 #[derive(Deserialize)]
 struct WasteCreateIn {
     item_id: i64,
-    qty: i64,
+    qty: Quantity,
     reason: String,
     #[serde(default)]
     description: Option<String>,
@@ -1140,7 +1208,7 @@ async fn create_waste(
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     let db = s.db.lock().unwrap();
     let u = current_user(&db, &s.secret, &headers, Some("staff"), false)?;
-    if p.qty < 1 || p.reason.trim().is_empty() {
+    if p.qty <= 0 || p.reason.trim().is_empty() {
         return Err(ApiError::bad("报损资料格式错误"));
     }
     if p.description
@@ -1216,7 +1284,7 @@ async fn confirm_waste(
 ) -> Result<Json<Value>, ApiError> {
     let mut db = s.db.lock().unwrap();
     let u = current_user(&db, &s.secret, &headers, Some("manager"), false)?;
-    let row: Option<(String, i64, i64, Option<i64>)> = db
+    let row: Option<(String, i64, Quantity, Option<i64>)> = db
         .query_row(
             "SELECT status,item_id,qty,batch_id FROM waste_records WHERE id=?1",
             [id],
@@ -1258,7 +1326,7 @@ async fn reject_waste(
 fn count_detail_json(db: &Connection, id: i64) -> rusqlite::Result<Value> {
     let (status,count_type,business_date,note,created_by,creator,created_at,verified_by,verifier,verified_at,review_reason,review_note,comparison_id):(String,String,Option<String>,Option<String>,i64,String,String,Option<i64>,String,Option<String>,Option<String>,Option<String>,Option<i64>)=db.query_row("SELECT c.status,c.count_type,c.business_date,c.note,c.created_by,coalesce(cu.display_name,''),c.created_at,c.verified_by,coalesce(vu.display_name,''),c.verified_at,c.review_reason,c.review_note,c.comparison_id FROM count_sessions c LEFT JOIN users cu ON cu.id=c.created_by LEFT JOIN users vu ON vu.id=c.verified_by WHERE c.id=?1",[id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?,r.get(7)?,r.get(8)?,r.get(9)?,r.get(10)?,r.get(11)?,r.get(12)?)))?;
     let mut st=db.prepare("SELECT e.id,e.item_id,coalesce(i.name,'?'),coalesce(i.unit,''),e.expected_qty,e.qty_counted,e.is_enough,e.reviewed_qty,e.reported_qty,coalesce((SELECT sum(b.qty) FROM batches b WHERE b.item_id=e.item_id),0) FROM count_entries e LEFT JOIN items i ON i.id=e.item_id WHERE e.session_id=?1 ORDER BY e.id")?;
-    let entries=st.query_map([id],|r|{let expected:i64=r.get(4)?;let counted:i64=r.get(5)?;let reviewed:Option<i64>=r.get(7)?;Ok(json!({"id":r.get::<_,i64>(0)?,"item_id":r.get::<_,i64>(1)?,"item_name":r.get::<_,String>(2)?,"unit":r.get::<_,String>(3)?,"expected_qty":expected,"qty_counted":counted,"diff":counted-expected,"is_enough":r.get::<_,Option<bool>>(6)?,"reviewed_qty":reviewed,"reported_qty":r.get::<_,Option<i64>>(8)?,"review_diff":reviewed.map(|qty|qty-counted),"current_qty":r.get::<_,i64>(9)?}))})?.collect::<Result<Vec<_>,_>>()?;
+    let entries=st.query_map([id],|r|{let expected:Quantity=r.get(4)?;let counted:Quantity=r.get(5)?;let reviewed:Option<Quantity>=r.get(7)?;Ok(json!({"id":r.get::<_,i64>(0)?,"item_id":r.get::<_,i64>(1)?,"item_name":r.get::<_,String>(2)?,"unit":r.get::<_,String>(3)?,"expected_qty":expected,"qty_counted":counted,"diff":counted-expected,"is_enough":r.get::<_,Option<bool>>(6)?,"reviewed_qty":reviewed,"reported_qty":r.get::<_,Option<Quantity>>(8)?,"review_diff":reviewed.map(|qty|qty-counted),"current_qty":r.get::<_,Quantity>(9)?}))})?.collect::<Result<Vec<_>,_>>()?;
     Ok(
         json!({"id":id,"status":status,"count_type":count_type,"business_date":business_date,"note":note,"created_by":created_by,"created_by_name":creator,"created_at":out_dt(created_at),"verified_by":verified_by,"verified_by_name":verifier,"verified_at":verified_at.map(out_dt),"review_reason":review_reason,"review_note":review_note,"comparison_id":comparison_id,"entries":entries}),
     )
@@ -1267,7 +1335,7 @@ fn count_detail_json(db: &Connection, id: i64) -> rusqlite::Result<Value> {
 struct CountLineIn {
     item_id: i64,
     #[serde(default)]
-    qty: Option<i64>,
+    qty: Option<Quantity>,
     #[serde(default)]
     enough: Option<bool>,
 }
@@ -1356,13 +1424,16 @@ async fn create_count(
         for row in st.query_map([id], |r| {
             Ok((
                 r.get::<_, i64>(0)?,
-                (r.get::<_, Option<bool>>(1)?, r.get::<_, Option<i64>>(2)?),
+                (
+                    r.get::<_, Option<bool>>(1)?,
+                    r.get::<_, Option<Quantity>>(2)?,
+                ),
             ))
         })? {
             let (item, values) = row?;
             previous.insert(item, values);
         }
-        let incoming: HashMap<i64, (Option<bool>, Option<i64>)> = p
+        let incoming: HashMap<i64, (Option<bool>, Option<Quantity>)> = p
             .entries
             .iter()
             .map(|entry| (entry.item_id, (entry.enough, entry.qty)))
@@ -1601,7 +1672,7 @@ struct CountPairIn {
 #[derive(Deserialize)]
 struct CountCorrectionIn {
     item_id: i64,
-    qty: i64,
+    qty: Quantity,
 }
 
 #[derive(Deserialize)]
@@ -1630,9 +1701,9 @@ struct PairEntry {
     item_id: i64,
     item_name: String,
     unit: String,
-    first_qty: Option<i64>,
-    second_qty: Option<i64>,
-    current_qty: i64,
+    first_qty: Option<Quantity>,
+    second_qty: Option<Quantity>,
+    current_qty: Quantity,
     result: String,
 }
 
@@ -1731,12 +1802,12 @@ fn pair_state(
             json!({"code":"self_review_not_allowed","message":"确认人不能是任一盘点提交人"}),
         ));
     }
-    let load_entries = |session_id: i64| -> rusqlite::Result<HashMap<i64, i64>> {
+    let load_entries = |session_id: i64| -> rusqlite::Result<HashMap<i64, Quantity>> {
         let mut statement =
             db.prepare("SELECT item_id,qty_counted FROM count_entries WHERE session_id=?1")?;
         statement
             .query_map([session_id], |r| {
-                Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
+                Ok((r.get::<_, i64>(0)?, r.get::<_, Quantity>(1)?))
             })?
             .collect::<Result<HashMap<_, _>, _>>()
     };
@@ -1816,7 +1887,7 @@ async fn preview_count_pair(
 fn count_comparison_json(db: &Connection, id: i64) -> rusqlite::Result<Value> {
     let (first,second,resolution,trusted,note,confirmed_by,confirmed_name,confirmed_at):(i64,i64,String,Option<i64>,Option<String>,i64,String,String)=db.query_row("SELECT c.first_session_id,c.second_session_id,c.resolution,c.trusted_session_id,c.note,c.confirmed_by,coalesce(u.display_name,''),c.confirmed_at FROM count_comparisons c LEFT JOIN users u ON u.id=c.confirmed_by WHERE c.id=?1",[id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?,r.get(7)?)))?;
     let mut st=db.prepare("SELECT e.item_id,coalesce(i.name,'?'),coalesce(i.unit,''),e.first_qty,e.second_qty,e.final_qty,e.result FROM count_comparison_entries e LEFT JOIN items i ON i.id=e.item_id WHERE e.comparison_id=?1 ORDER BY e.id")?;
-    let entries=st.query_map([id],|r|Ok(json!({"item_id":r.get::<_,i64>(0)?,"item_name":r.get::<_,String>(1)?,"unit":r.get::<_,String>(2)?,"first_qty":r.get::<_,Option<i64>>(3)?,"second_qty":r.get::<_,Option<i64>>(4)?,"final_qty":r.get::<_,Option<i64>>(5)?,"result":r.get::<_,String>(6)?})))?.collect::<Result<Vec<_>,_>>()?;
+    let entries=st.query_map([id],|r|Ok(json!({"item_id":r.get::<_,i64>(0)?,"item_name":r.get::<_,String>(1)?,"unit":r.get::<_,String>(2)?,"first_qty":r.get::<_,Option<Quantity>>(3)?,"second_qty":r.get::<_,Option<Quantity>>(4)?,"final_qty":r.get::<_,Option<Quantity>>(5)?,"result":r.get::<_,String>(6)?})))?.collect::<Result<Vec<_>,_>>()?;
     Ok(
         json!({"id":id,"first_count_id":first,"second_count_id":second,"resolution":resolution,"trusted_count_id":trusted,"note":note,"confirmed_by":confirmed_by,"confirmed_by_name":confirmed_name,"confirmed_at":out_dt(confirmed_at),"entries":entries}),
     )
@@ -1917,6 +1988,21 @@ async fn confirm_count_pair(
                     _ => unreachable!(),
                 }
             };
+            let source = match p.resolution.as_str() {
+                "trusted_first" => &state.first,
+                "trusted_second" => &state.second,
+                _ if state.later_count_id == state.first.id => &state.first,
+                _ => &state.second,
+            };
+            let changed: bool = db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM stock_movements WHERE item_id=?1 AND created_at>?2)",
+                params![row.item_id, source.created_at],
+                |r| r.get(0),
+            )?;
+            if changed {
+                return Err(ApiError::conflict(json!({"code":"count_observation_stale",
+                    "message":"采用的盘点记录之后已有库存变动，请重新盘点并提交后再比对"})));
+            }
             final_qty.insert(row.item_id, qty);
         }
     }
@@ -2004,9 +2090,9 @@ async fn count_comparison_detail(
 #[derive(Deserialize)]
 struct CountReviewLineIn {
     item_id: i64,
-    qty: i64,
+    qty: Quantity,
     #[serde(default)]
-    expected_current_qty: Option<i64>,
+    expected_current_qty: Option<Quantity>,
 }
 
 #[derive(Deserialize)]
@@ -2077,8 +2163,8 @@ async fn verify_count(
             .query_map([id], |r| {
                 Ok((
                     r.get::<_, i64>(0)?,
-                    r.get::<_, i64>(1)?,
-                    r.get::<_, i64>(2)?,
+                    r.get::<_, Quantity>(1)?,
+                    r.get::<_, Quantity>(2)?,
                     r.get::<_, String>(3)?,
                     r.get::<_, i64>(4)?,
                 ))
@@ -2106,7 +2192,7 @@ async fn verify_count(
         for (item, submitted_qty, _, name, _) in &entries {
             let review = &reviewed[item];
             if review.qty != *submitted_qty {
-                differences.push(json!({"item_id":item,"item_name":name,"submitted_qty":submitted_qty,"reviewed_qty":review.qty,"diff":review.qty-submitted_qty}));
+                differences.push(json!({"item_id":item,"item_name":name,"submitted_qty":submitted_qty,"reviewed_qty":review.qty,"diff":review.qty-*submitted_qty}));
             }
             let current = item_stock(&db, *item)?;
             if review
@@ -2204,6 +2290,49 @@ mod tests {
     use tower::ServiceExt;
 
     #[test]
+    fn shared_consumption_sql_reconstructs_usage_without_replaying_adjustments() {
+        let conn = Connection::open_in_memory().unwrap();
+        crate::db::migrate(&conn).unwrap();
+        conn.execute_batch("
+            INSERT INTO users(id,username,display_name,pin_hash,role) VALUES
+              (1,'m','Manager','x','manager'), (2,'s1','One','x','staff'), (3,'s2','Two','x','staff');
+            INSERT INTO items(id,name,unit,shelf_life_days,min_stock) VALUES(1,'Bread','bag',30,10);
+            INSERT INTO batches(id,item_id,qty,initial_qty,expiry_date) VALUES(1,1,45,100,'2099-01-01');
+            INSERT INTO count_sessions(id,created_by,created_at,status) VALUES
+              (1,2,'2026-08-30 03:55:00','verified'), (2,3,'2026-08-30 04:00:00','verified'),
+              (3,2,'2026-09-06 03:55:00','verified'), (4,3,'2026-09-06 04:00:00','verified');
+            INSERT INTO count_comparisons(id,first_session_id,second_session_id,resolution,confirmed_by,confirmed_at) VALUES
+              (1,1,2,'no_difference',1,'2026-08-30 04:02:00'), (2,3,4,'no_difference',1,'2026-09-06 04:02:00');
+            INSERT INTO count_comparison_entries(comparison_id,item_id,first_qty,second_qty,final_qty,result) VALUES
+              (1,1,100,100,100,'same'),(2,1,45,45,45,'same');
+            INSERT INTO stock_movements(item_id,batch_id,delta,operation,reference_type,reference_id,actor_id,created_at) VALUES
+              (1,1,60,'stock_receive','manual',NULL,1,'2026-09-01 04:00:00'),
+              (1,1,-110,'count_shortage','count_comparison',2,1,'2026-09-06 04:02:00');
+            INSERT INTO waste_records(item_id,qty,reason,status,reported_by,reported_at,confirmed_by,confirmed_at) VALUES
+              (1,5,'broken','confirmed',2,'2026-09-02 04:00:00',1,'2026-09-02 04:00:00');
+        ").unwrap();
+        conn.execute_batch(include_str!("../migrations/20260908_09.sql"))
+            .unwrap();
+        let raw: String = conn
+            .query_row(
+                include_str!("../../server/app/consumption.sql"),
+                rusqlite::named_params! {":as_of": "2026-09-08 04:00:00", ":days": 56,
+                ":lead_days": 2, ":coverage_days": 7},
+                |r| r.get(0),
+            )
+            .unwrap();
+        let row: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(row["consumption"].as_f64(), Some(110.0));
+        assert_eq!(row["valid_periods"], 1);
+        assert_eq!(row["daily_rate"], 15.7);
+        assert_eq!(row["estimated_qty"], 13.6);
+        assert_eq!(row["replenishment_gap"], 137.9);
+        assert_eq!(row["status"], "reorder");
+        assert!(row["forecast_issue"].is_null());
+        assert_eq!(item_stock(&conn, 1).unwrap(), 45);
+    }
+
+    #[test]
     fn five_concurrent_deductions_never_overdraw() {
         let dir = tempfile::tempdir().unwrap();
         let conn = crate::db::open(&dir.path().join("concurrency.db")).unwrap();
@@ -2213,6 +2342,8 @@ mod tests {
         ).unwrap();
         conn.execute("INSERT INTO items(name,category,unit,shelf_life_days,min_stock,active,sort_order,created_at) VALUES('面包','','袋',7,0,1,0,CURRENT_TIMESTAMP)",[]).unwrap();
         conn.execute("INSERT INTO batches(item_id,qty,initial_qty,expiry_date,received_at,source) VALUES(1,10,10,'2099-01-01',CURRENT_TIMESTAMP,'init')",[]).unwrap();
+        conn.execute_batch(include_str!("../migrations/20260908_09.sql"))
+            .unwrap();
         let db = Arc::new(Mutex::new(conn));
         let handles: Vec<_> = (0..5)
             .map(|_| {
@@ -2220,7 +2351,7 @@ mod tests {
                 std::thread::spawn(move || {
                     let mut guard = db.lock().unwrap();
                     let tx = guard.transaction().unwrap();
-                    if deduct_fefo(&tx, 1, 3, None, 1, "test", "test", None).is_ok() {
+                    if deduct_fefo(&tx, 1, Quantity(30), None, 1, "test", "test", None).is_ok() {
                         tx.commit().unwrap();
                         true
                     } else {

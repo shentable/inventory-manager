@@ -6,6 +6,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from . import models
+from .quantity import ticks
 
 
 STORE_TIMEZONE = timezone(timedelta(hours=8))
@@ -21,13 +22,13 @@ def days_to_expiry(expiry_date: str, ref: date | None = None) -> int:
     return (date.fromisoformat(expiry_date) - (ref or today())).days
 
 
-def item_stock(db: Session, item_id: int) -> int:
+def item_stock(db: Session, item_id: int) -> float:
     total = db.scalar(
         select(func.coalesce(func.sum(models.Batch.qty), 0)).where(
             models.Batch.item_id == item_id
         )
     )
-    return int(total or 0)
+    return round(float(total or 0), 1)
 
 
 def positive_batches(db: Session, item_id: int) -> list[models.Batch]:
@@ -44,7 +45,7 @@ def positive_batches(db: Session, item_id: int) -> list[models.Batch]:
 def deduct_fefo(
     db: Session,
     item_id: int,
-    qty: int,
+    qty: float,
     batch_id: int | None = None,
     actor_id: int | None = None,
     operation: str = "deduct",
@@ -76,14 +77,15 @@ def deduct_fefo(
         return
 
     batches = positive_batches(db, item_id)
-    if sum(b.qty for b in batches) < qty:
+    if sum(ticks(b.qty) for b in batches) < ticks(qty):
         raise HTTPException(status_code=400, detail="库存不足，无法扣减")
 
-    remaining = qty
+    remaining = ticks(qty)
     for b in batches:
         if remaining <= 0:
             break
-        take = min(b.qty, remaining)
+        take_ticks = min(ticks(b.qty), remaining)
+        take = take_ticks / 10
         result = db.execute(
             update(models.Batch)
             .where(models.Batch.id == b.id, models.Batch.qty >= take)
@@ -92,13 +94,13 @@ def deduct_fefo(
         if result.rowcount != 1:
             raise HTTPException(status_code=409, detail="库存已变化，请重试")
         _record_movement(db, b, -take, actor_id, operation, reference_type, reference_id)
-        remaining -= take
+        remaining -= take_ticks
 
 
 def _record_movement(
     db: Session,
     batch: models.Batch,
-    delta: int,
+    delta: float,
     actor_id: int | None,
     operation: str,
     reference_type: str,

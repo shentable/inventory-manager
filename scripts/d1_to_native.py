@@ -65,7 +65,7 @@ def build_manifest(database: Path) -> dict[str, object]:
             for row in connection.execute(
                 """
                 SELECT i.id item_id, i.name,
-                       COALESCE(SUM(CASE WHEN b.qty > 0 THEN b.qty ELSE 0 END), 0) stock
+                       COALESCE(SUM(CASE WHEN b.qty > 0 THEN b.qty ELSE 0 END), 0) / 10.0 stock
                 FROM items i LEFT JOIN batches b ON b.item_id = i.id
                 GROUP BY i.id, i.name ORDER BY i.id
                 """
@@ -75,7 +75,7 @@ def build_manifest(database: Path) -> dict[str, object]:
             dict(row)
             for row in connection.execute(
                 """
-                SELECT operation, count(*) movement_count, COALESCE(sum(delta), 0) net_delta
+                SELECT operation, count(*) movement_count, COALESCE(sum(delta), 0) / 10.0 net_delta
                 FROM stock_movements GROUP BY operation ORDER BY operation
                 """
             )

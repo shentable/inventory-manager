@@ -347,6 +347,25 @@
   }
 
   /* ---------- 步进器（长按连续增减） ---------- */
+  function formatQuantity(value) {
+    if (value === null || value === undefined || !Number.isFinite(Number(value))) { return '—'; }
+    return String(Number(Number(value).toFixed(1)));
+  }
+  function validateQuantities(root, values) {
+    var inputs = root.querySelectorAll('.quantity-input');
+    for (var i = 0; i < inputs.length; i++) {
+      if (!inputs[i].checkValidity()) {
+        inputs[i].reportValidity();
+        toast(t('数量必须大于或等于 0，最多一位小数'), 'warn');
+        return false;
+      }
+    }
+    if (values && Object.keys(values).some(function (key) { return !Number.isFinite(values[key]); })) {
+      toast(t('请修正无效的数量后再继续'), 'warn');
+      return false;
+    }
+    return true;
+  }
   function stepper(init, opts) {
     opts = opts || {};
     var min = opts.min !== undefined ? opts.min : 0;
@@ -357,19 +376,35 @@
 
     var root = h('div', { class: 'stepper' });
     var minus = h('button', { class: 'step-btn minus', 'aria-label': t('减少') }, '−');
-    var valEl = h('div', { class: 'step-val' }, String(value));
+    var valEl = h('input', { class: 'step-val quantity-input', type: 'number', inputmode: 'decimal',
+      step: '0.1', min: String(min), max: Number.isFinite(max) ? String(max) : null,
+      required: 'required', 'aria-label': t('数量'), value: formatQuantity(value) });
     var plus = h('button', { class: 'step-btn plus', 'aria-label': t('增加') }, '+');
     root.appendChild(minus);
     root.appendChild(valEl);
     root.appendChild(plus);
 
     function set(v, notify) {
-      value = clampNum(v, min, max);
-      valEl.textContent = String(value);
+      value = Math.round(clampNum(v, min, max) * 10) / 10;
+      valEl.value = formatQuantity(value);
       minus.disabled = value <= min;
       plus.disabled = value >= max;
       if (notify !== false && onChange) { onChange(value); }
     }
+
+    valEl.addEventListener('input', function () {
+      var raw = valEl.value;
+      var valid = /^\d+(?:\.\d?)?$/.test(raw) && valEl.checkValidity();
+      if (valid) {
+        value = Number(raw);
+        minus.disabled = value <= min;
+        plus.disabled = value >= max;
+      }
+      if (onChange) { onChange(valid ? value : NaN); }
+    });
+    valEl.addEventListener('change', function () {
+      if (valEl.checkValidity() && /^\d+(?:\.\d?)?$/.test(valEl.value)) { set(Number(valEl.value)); }
+    });
 
     function repeat(btn, delta) {
       var timer = null;
@@ -404,6 +439,7 @@
     repeat(minus, -step);
     repeat(plus, step);
     set(value, false);
+    if (!Number.isFinite(Number(init))) { valEl.value = ''; }
 
     return {
       el: root,
@@ -582,6 +618,8 @@
     openSheet: openSheet,
     closeOverlays: closeOverlays,
     stepper: stepper,
+    formatQuantity: formatQuantity,
+    validateQuantities: validateQuantities,
     chips: chips,
     toggleSwitch: toggleSwitch,
     field: field,

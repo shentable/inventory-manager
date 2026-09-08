@@ -5,6 +5,7 @@ from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, Uni
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base, utcnow
+from .quantity import QuantityColumn
 
 
 class StoreMeta(Base):
@@ -54,7 +55,7 @@ class Item(Base):
     category: Mapped[str] = mapped_column(String(64), default="")
     unit: Mapped[str] = mapped_column(String(16), default="个")
     shelf_life_days: Mapped[int] = mapped_column(Integer, default=7)
-    min_stock: Mapped[int] = mapped_column(Integer, default=0)
+    min_stock: Mapped[float] = mapped_column(QuantityColumn, default=0)
     daily_count_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     weekly_count_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -67,8 +68,8 @@ class Batch(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     item_id: Mapped[int] = mapped_column(ForeignKey("items.id"), index=True)
-    qty: Mapped[int] = mapped_column(Integer, default=0)          # 剩余数量
-    initial_qty: Mapped[int] = mapped_column(Integer, default=0)  # 初始数量
+    qty: Mapped[float] = mapped_column(QuantityColumn, default=0)          # 剩余数量
+    initial_qty: Mapped[float] = mapped_column(QuantityColumn, default=0)  # 初始数量
     expiry_date: Mapped[str] = mapped_column(String(10))          # YYYY-MM-DD
     received_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     source: Mapped[str] = mapped_column(String(16), default="init")  # purchase|receive|init|adjust
@@ -85,7 +86,7 @@ class StockMovement(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     item_id: Mapped[int] = mapped_column(ForeignKey("items.id"), index=True)
     batch_id: Mapped[int] = mapped_column(ForeignKey("batches.id"), index=True)
-    delta: Mapped[int] = mapped_column(Integer)
+    delta: Mapped[float] = mapped_column(QuantityColumn)
     operation: Mapped[str] = mapped_column(String(32))
     reference_type: Mapped[str] = mapped_column(String(32))
     reference_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -119,7 +120,7 @@ class PurchaseItem(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     purchase_id: Mapped[int] = mapped_column(ForeignKey("purchases.id"), index=True)
     item_id: Mapped[int] = mapped_column(ForeignKey("items.id"))
-    qty: Mapped[int] = mapped_column(Integer)
+    qty: Mapped[float] = mapped_column(QuantityColumn)
 
     purchase: Mapped["Purchase"] = relationship(back_populates="items")
     item: Mapped["Item"] = relationship()
@@ -153,11 +154,11 @@ class CountEntry(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     session_id: Mapped[int] = mapped_column(ForeignKey("count_sessions.id"), index=True)
     item_id: Mapped[int] = mapped_column(ForeignKey("items.id"))
-    qty_counted: Mapped[int] = mapped_column(Integer)
-    expected_qty: Mapped[int] = mapped_column(Integer)  # 提交时服务器快照
+    qty_counted: Mapped[float] = mapped_column(QuantityColumn)
+    expected_qty: Mapped[float] = mapped_column(QuantityColumn)  # 提交时服务器快照
     is_enough: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    reported_qty: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    reviewed_qty: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reported_qty: Mapped[float | None] = mapped_column(QuantityColumn, nullable=True)
+    reviewed_qty: Mapped[float | None] = mapped_column(QuantityColumn, nullable=True)
 
     session: Mapped["CountSession"] = relationship(back_populates="entries")
     item: Mapped["Item"] = relationship()
@@ -188,9 +189,9 @@ class CountComparisonEntry(Base):
         ForeignKey("count_comparisons.id", ondelete="CASCADE"), index=True
     )
     item_id: Mapped[int] = mapped_column(ForeignKey("items.id"))
-    first_qty: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    second_qty: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    final_qty: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    first_qty: Mapped[float | None] = mapped_column(QuantityColumn, nullable=True)
+    second_qty: Mapped[float | None] = mapped_column(QuantityColumn, nullable=True)
+    final_qty: Mapped[float | None] = mapped_column(QuantityColumn, nullable=True)
     result: Mapped[str] = mapped_column(String(24))
 
 
@@ -200,7 +201,7 @@ class WasteRecord(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     item_id: Mapped[int] = mapped_column(ForeignKey("items.id"), index=True)
     batch_id: Mapped[int | None] = mapped_column(ForeignKey("batches.id"), nullable=True)
-    qty: Mapped[int] = mapped_column(Integer)
+    qty: Mapped[float] = mapped_column(QuantityColumn)
     reason: Mapped[str] = mapped_column(String(64))
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)
     photo_mime: Mapped[str | None] = mapped_column(String(32), nullable=True)

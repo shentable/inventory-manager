@@ -20,7 +20,7 @@ from starlette.responses import Response
 
 from .auth import validate_secret_key
 from .database import SessionLocal
-from .routers import auth, count_comparisons, counts, dashboard, health, items, purchases, stock, users, waste
+from .routers import auth, consumption, count_comparisons, counts, dashboard, health, items, purchases, stock, users, waste
 
 DEFAULT_WEB_DIR = Path(__file__).resolve().parents[2] / "web"  # <仓库根>/web
 
@@ -105,6 +105,7 @@ app.include_router(count_comparisons.router)
 app.include_router(waste.router)
 app.include_router(purchases.router)
 app.include_router(dashboard.router)
+app.include_router(consumption.router)
 
 web_dir = _resolve_web_dir()
 if web_dir is not None:

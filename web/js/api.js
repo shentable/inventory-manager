@@ -270,6 +270,9 @@
       return request('/auth/change-pin', { method: 'POST', body: { current_pin: currentPin, new_pin: newPin } });
     },
     dashboard: function () { return request('/dashboard'); },
+    consumption: function (days, leadDays, coverageDays) {
+      return request('/consumption?days=' + days + '&lead_days=' + leadDays + '&coverage_days=' + coverageDays);
+    },
 
     // 库存品
     items: function (includeInactive) {

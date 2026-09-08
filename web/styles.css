@@ -1,4 +1,43 @@
 /* ===== 飨拓™库存管理 — 全局样式 ===== */
+.consumption-intro { margin: 8px 0 18px; color: var(--text-2); font-size: 14px; }
+.consumption-settings { border-radius: 12px; background: var(--card); margin-bottom: 10px; }
+.consumption-settings > summary { padding: 12px 14px; font-size: 14px; font-weight: 700; cursor: pointer; }
+.consumption-settings .consumption-controls { margin-bottom: 0; padding-top: 0; }
+.consumption-controls { padding: 16px; border-radius: 16px; background: var(--card); margin-bottom: 12px; }
+.consumption-control-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.consumption-controls .btn { width: 100%; margin-top: 8px; }
+.consumption-method { padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; margin-bottom: 16px; font-size: 13px; color: var(--text-2); }
+.consumption-method summary, .consumption-detail summary { cursor: pointer; color: var(--text); font-weight: 700; padding: 5px 0; }
+.consumption-method p { margin-top: 10px; }
+.consumption-filters { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 12px 0; }
+.consumption-filters button { min-width: 0; min-height: 70px; padding: 8px 2px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: var(--text); cursor: pointer; }
+.consumption-filters button[aria-pressed="true"] { border-color: var(--primary); background: var(--primary-light); }
+.consumption-filters strong, .consumption-filters span { display: block; }
+.consumption-filters strong { font-size: 23px; font-variant-numeric: tabular-nums; }
+.consumption-filters span { font-size: 12px; margin-top: 3px; }
+.consumption-list { display: grid; gap: 16px; }
+.consumption-card { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 16px; overflow-wrap: anywhere; }
+.consumption-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+.consumption-card-head h2 { font-size: 20px; }
+.consumption-category { color: var(--text-2); font-size: 12px; }
+.consumption-status { border-radius: 8px; background: var(--green-bg); color: var(--green); padding: 5px 8px; font-size: 11px; font-weight: 700; max-width: 45%; }
+.consumption-shortage .consumption-status, .consumption-reorder .consumption-status { background: var(--red-bg); color: var(--red); }
+.consumption-review .consumption-status { background: var(--amber-bg); color: #825705; }
+.consumption-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.consumption-metric { min-width: 0; }
+.consumption-metric span { display: block; color: var(--text-2); font-size: 12px; }
+.consumption-metric strong { display: block; font-size: 18px; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.consumption-prediction { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px; background: var(--bg); border-radius: 10px; margin: 12px 0; }
+.consumption-meta { color: var(--text-2); font-size: 12px; margin: 6px 0; line-height: 1.65; }
+.consumption-warning { font-size: 12px; color: #825705; background: var(--amber-bg); padding: 8px 10px; border-radius: 8px; margin: 8px 0; }
+.consumption-gap { display: flex; justify-content: space-between; align-items: center; gap: 8px; border-top: 1px solid var(--line); padding-top: 12px; margin-top: 12px; font-size: 13px; }
+.consumption-gap strong { color: var(--primary-dark); font-size: 20px; }
+.consumption-detail { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 8px; font-size: 13px; }
+.consumption-period { margin-top: 10px; padding: 12px 0; border-top: 1px dashed var(--line); font-size: 13px; }
+.consumption-period > p { margin-top: 6px; }
+.consumption-trend { margin-top: 8px; height: 6px; background: var(--bg); border-radius: 4px; overflow: hidden; }
+.consumption-trend > div { height: 100%; background: var(--primary); border-radius: 4px; }
+.consumption-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
 :root {
   --primary: #e07a3f;
   --primary-dark: #c96227;
@@ -196,7 +235,8 @@ input, select { font-family: inherit; }
 }
 .step-btn:active { transform: scale(.94); }
 .step-btn:disabled { opacity: .3; pointer-events: none; }
-.step-val { min-width: 72px; text-align: center; font-size: 26px; font-weight: 800; color: var(--text); font-variant-numeric: tabular-nums; }
+.step-val { width: 80px; min-width: 0; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; text-align: center; font-size: 26px; font-weight: 800; color: var(--text); font-variant-numeric: tabular-nums; appearance: textfield; -moz-appearance: textfield; }
+.step-val::-webkit-inner-spin-button, .step-val::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 
 /* ===== 通用行 / 卡片 ===== */
 .count-row, .pick-card, .stock-row, .diff-row, .batch-row {

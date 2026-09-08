@@ -12,6 +12,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from ..database import utcnow
+from ..quantity import QuantityInput
 from ..deps import get_db, require_role
 from ..inventory import deduct_fefo, item_stock, record_batch_creation, today
 from ..models import (
@@ -21,6 +22,7 @@ from ..models import (
     CountEntry,
     CountSession,
     Item,
+    StockMovement,
     User,
 )
 
@@ -34,7 +36,7 @@ class PairIn(BaseModel):
 
 class CorrectionIn(BaseModel):
     item_id: int = Field(ge=1)
-    qty: int = Field(ge=0)
+    qty: QuantityInput = Field(ge=0)
 
 
 class ConfirmIn(PairIn):
@@ -244,7 +246,7 @@ def confirm_pair(
     if payload.resolution != "manager_corrected" and corrections:
         raise HTTPException(status_code=400, detail="当前处理方式不接受更正数量")
 
-    final: dict[int, int] = {}
+    final: dict[int, float] = {}
     if payload.resolution != "recount_required":
         for row in shared:
             if row["result"] == "same" or payload.resolution == "no_difference":
@@ -274,6 +276,24 @@ def confirm_pair(
     )
     db.add(comparison)
     db.flush()
+    # Refreshing a preview cannot make an observation predating stock changes current.
+    for item_id in final:
+        source_id = (
+            state["first"]["id"] if payload.resolution == "trusted_first"
+            else state["second"]["id"] if payload.resolution == "trusted_second"
+            else state["later_count_id"]
+        )
+        source = state["first"] if source_id == state["first"]["id"] else state["second"]
+        changed = db.scalar(select(StockMovement.id).where(
+            StockMovement.item_id == item_id,
+            StockMovement.created_at > source["created_at"],
+        ).limit(1))
+        if changed is not None:
+            raise HTTPException(status_code=409, detail={
+                "code": "count_observation_stale",
+                "message": "采用的盘点记录之后已有库存变动，请重新盘点并提交后再比对",
+            })
+
     next_status = "rejected" if payload.resolution == "recount_required" else "verified"
     reason = "paired_" + payload.resolution
     for count_id in (state["first"]["id"], state["second"]["id"]):
@@ -320,7 +340,7 @@ def confirm_pair(
             if row["item_id"] in second_entries:
                 second_entries[row["item_id"]].reviewed_qty = final_qty
             current_qty = item_stock(db, row["item_id"])
-            delta = final_qty - current_qty
+            delta = round(final_qty - current_qty, 1)
             if delta < 0:
                 deduct_fefo(
                     db, row["item_id"], -delta, actor_id=manager.id,
