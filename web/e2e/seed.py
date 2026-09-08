@@ -23,7 +23,7 @@ with SessionLocal() as db:
         StoreMeta(
             id=1,
             store_id="00000000-0000-4000-8000-000000000001",
-            schema_version="20260908_09",
+            schema_version="20260908_10",
         )
     )
     users = [

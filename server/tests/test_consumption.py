@@ -146,6 +146,18 @@ def test_weighted_by_duration_and_excluded_periods(client, auth, manager_token, 
     assert short_window["periods"][0]["exclusion"] == "outside_window"
 
 
+def test_receipt_correction_difference_is_included_once(client, auth, manager_token, scenario):
+    _, _, _, anchor, movement, _ = scenario
+    anchor(10, NOW-timedelta(days=9))
+    movement(2, NOW-timedelta(days=8))
+    movement(-0.5, NOW-timedelta(days=7), "stock_receive_correction")
+    anchor(4.5, NOW-timedelta(days=2))
+    row = get(client, auth, manager_token)
+    assert row['consumption'] == 7
+    assert row['periods'][0]['received'] == 1.5
+    assert row['daily_rate'] == 1
+
+
 def test_daily_shortage_overrides_prediction_and_inactive_hidden(client, auth, manager_token, db, scenario, make_item):
     item, _, actor, anchor, _, _ = scenario
     anchor(150, NOW - timedelta(days=9))

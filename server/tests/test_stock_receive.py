@@ -50,14 +50,14 @@ def test_admin_can_receive_stock_directly(client, admin_token, auth, make_item):
     assert response.status_code == 201
 
 
-def test_staff_cannot_receive_stock_directly(client, staff_token, auth, make_item):
-    item = make_item(name="店员不可入库")
+def test_staff_can_receive_stock_directly(client, staff_token, auth, make_item):
+    item = make_item(name="店员入库")
     response = client.post(
         "/api/stock/receive",
         json={"items": [{"item_id": item.id, "qty": 2, "expiry_date": "2099-01-01"}]},
         headers=auth(staff_token),
     )
-    assert response.status_code == 403
+    assert response.status_code == 201
 
 
 def test_direct_receive_validates_lines(client, manager_token, auth, make_item):

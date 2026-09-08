@@ -204,6 +204,18 @@ def scenario(base: str):
     call("POST", f"/api/waste/{fractional_waste['id']}/confirm", token=admin["token"])
     call("GET", f"/api/items/{fractional['id']}/batches", token=admin["token"])
     call("GET", f"/api/items/{fractional['id']}/movements", token=admin["token"])
+    own_receipt, _ = call("POST", "/api/stock/receive", {"items": [{"item_id": fractional["id"], "qty": 1.2, "expiry_date": "2099-01-01"}]}, staff["token"])
+    receipt_path = f"/api/stock/receipts/{own_receipt[0]['id']}"
+    call("GET", "/api/stock/receipts?limit=1", token=staff["token"])
+    call("GET", receipt_path, token=staff_b["token"])
+    correction = {"qty": 0.8, "expiry_date": "2099-02-01", "note": "更正备注", "reason": "核对送货单", "expected_revision": 0}
+    call("PATCH", receipt_path, correction, staff_b["token"])
+    changed, _ = call("PATCH", receipt_path, correction, staff["token"])
+    call("PATCH", receipt_path, correction, admin["token"])
+    correction.update(qty=0.5, expected_revision=changed["revision"])
+    call("PATCH", receipt_path, correction, admin["token"])
+    call("GET", receipt_path, token=staff["token"])
+    call("GET", f"/api/items/{fractional['id']}/movements", token=admin["token"])
     rate_statuses = []
     retry_seen = False
     for _ in range(5):

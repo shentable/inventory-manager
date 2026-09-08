@@ -284,6 +284,9 @@
     // 库存与效期
     stock: function () { return request('/stock'); },
     receiveStock: function (body) { return request('/stock/receive', { method: 'POST', body: body }); },
+    receipts: function (q, offset) { return request('/stock/receipts?q=' + encodeURIComponent(q || '') + '&offset=' + (offset || 0)); },
+    receipt: function (id) { return request('/stock/receipts/' + id); },
+    correctReceipt: function (id, body) { return request('/stock/receipts/' + id, { method: 'PATCH', body: body }); },
     itemBatches: function (id) { return request('/items/' + id + '/batches'); },
     expiry: function (days) { return request('/expiry?days=' + days); },
 

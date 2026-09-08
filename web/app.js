@@ -391,7 +391,7 @@
     feats.push({ icon: '📦', label: I18N.t('库存查询'), desc: I18N.t('总览与批次'), to: '#/stock' });
     if (canReview) { feats.push({ icon: '✅', label: I18N.t('盘点管理'), desc: I18N.t('待比对 · 记录 · 结果'), to: '#/count-review' }); }
     if (canReview) { feats.push({ icon: '✔️', label: I18N.t('确认报损'), desc: I18N.t('处理报损'), to: '#/waste-review' }); }
-    if (canReview) { feats.push({ icon: '📥', label: I18N.t('入库'), desc: I18N.t('直接增加库存批次'), to: '#/receive' }); }
+    feats.push({ icon: '📥', label: I18N.t('入库'), desc: I18N.t('登记到货、查询与更正'), to: '#/receive' });
     if (canReview) { feats.push({ icon: '🛒', label: I18N.t('采购'), desc: I18N.t('下单与入库'), to: '#/purchase' }); }
     if (canReview) { feats.push({ icon: '📊', label: I18N.t('消耗与补货'), desc: I18N.t('用量趋势与库存预测'), to: '#/consumption' }); }
     if (canReview) { feats.push({ icon: '🏷️', label: I18N.t('库存品管理'), desc: I18N.t('商品资料'), to: '#/items' }); }
@@ -1997,9 +1997,12 @@
     return { root: root };
   }
 
-  /* ================= 直接入库（店长/管理员） ================= */
+  /* ================= 直接入库（全员） ================= */
   function renderStockReceive() {
     var root = h('div', { class: 'page purchase-page' });
+    var history = h('button', { class: 'btn btn-ghost btn-block receipt-history-link' }, I18N.t('入库记录与更正'));
+    history.addEventListener('click', function () { location.hash = '#/receipts'; });
+    root.appendChild(history);
     var content = h('div', { class: 'purchase-content' });
     var quantities = {};
     root.appendChild(content);
@@ -2186,6 +2189,138 @@
       content.innerHTML = '';
       content.appendChild(window.UI.errorView((err && err.message) || I18N.t('库存品加载失败'), function () { renderRoute(); }));
     });
+    return { root: root };
+  }
+
+  /* ================= 入库记录与更正 ================= */
+  function renderReceipts() {
+    var currentUser = API.store.getUser() || {};
+    var root = h('div', { class: 'page receipt-page' });
+    root.appendChild(h('div', { class: 'page-title' }, I18N.t('入库记录与更正')));
+    root.appendChild(h('p', { class: 'page-hint' }, currentUser.role === 'staff' ?
+      I18N.t('查询和更正自己登记的入库，所有更正保留历史。') : I18N.t('查询和更正全部直接入库，所有更正保留历史。')));
+    var create = h('button', { class: 'btn btn-ghost btn-block' }, I18N.t('登记入库'));
+    create.addEventListener('click', function () { location.hash = '#/receive'; });
+    root.appendChild(create);
+    var content = h('div', {});
+    root.appendChild(content);
+    var query = '', generation = 0;
+    function qty(value, unit) { return window.UI.formatQuantity(value) + ' ' + unit; }
+    function showDetail(id) {
+      var gen = ++generation;
+      setBar(root, null);
+      content.innerHTML = '';
+      content.appendChild(window.UI.loadingView());
+      API.receipt(id).then(function (row) {
+        if (gen !== generation) { return; }
+        content.innerHTML = '';
+        var back = h('button', { class: 'btn btn-ghost btn-sm' }, '← ' + I18N.t('返回记录'));
+        back.addEventListener('click', showList);
+        content.appendChild(back);
+        content.appendChild(h('h2', {}, row.item_name));
+        content.appendChild(h('p', { class: 'page-hint' }, I18N.t('批次 #{id} · {name} · {time}', { id: row.id, name: row.received_by_name, time: fmtDateTime(row.received_at) })));
+        content.appendChild(h('p', {}, I18N.t('原始入库 {original} · 更正后入库 {qty} · 批次剩余 {remaining}', {
+          original: qty(row.original_qty, row.unit), qty: qty(row.qty, row.unit), remaining: qty(row.remaining_qty, row.unit)
+        })));
+        var form = h('form', { class: 'receipt-edit' });
+        var amount = h('input', { class: 'input quantity-input', type: 'number', inputmode: 'decimal', min: '0', max: '1000000000', step: '0.1', required: 'required', value: window.UI.formatQuantity(row.qty), 'aria-label': I18N.t('更正后入库数量') });
+        amount.disabled = row.quantity_locked;
+        var expiry = h('input', { class: 'input', type: 'date', required: 'required', value: row.expiry_date, 'aria-label': I18N.t('更正后效期') });
+        var note = h('textarea', { class: 'input', maxlength: '255', 'aria-label': I18N.t('入库备注') }, row.note || '');
+        var reason = h('textarea', { class: 'input', required: 'required', maxlength: '255', 'aria-label': I18N.t('更正原因') });
+        form.appendChild(window.UI.field(I18N.t('更正后入库数量') + '（' + row.unit + '）', amount));
+        form.appendChild(h('p', { class: 'page-hint' }, row.quantity_locked ?
+          I18N.t('已有后续确认盘点，数量请重新盘点核实；效期和备注仍可更正。') :
+          I18N.t('填写整笔入库的正确数量，系统按差额调整。数量填 0 可撤销尚未扣减的入库；商品选错请撤销后重新入库。')));
+        form.appendChild(window.UI.field(I18N.t('更正后效期'), expiry));
+        form.appendChild(window.UI.field(I18N.t('入库备注'), note));
+        form.appendChild(window.UI.field(I18N.t('更正原因'), reason));
+        var submit = h('button', { class: 'btn btn-primary btn-block', type: 'submit' }, I18N.t('保存更正'));
+        form.appendChild(submit);
+        form.addEventListener('submit', function (event) {
+          event.preventDefault();
+          if (!window.UI.validateQuantities(form) || !/^\d+(?:\.\d?)?$/.test(amount.value)) { return; }
+          if (!reason.value.trim()) { reason.focus(); window.UI.toast(I18N.t('请填写更正原因'), 'warn'); return; }
+          var newQty = Number(amount.value);
+          var proposedRemaining = Math.round((row.remaining_qty + newQty - row.qty) * 10) / 10;
+          if (proposedRemaining < 0) { window.UI.toast(I18N.t('更正数量小于该批次已扣减数量，请先核实库存'), 'warn'); return; }
+          submit.disabled = true;
+          window.UI.dialog({ title: I18N.t('确认入库更正'),
+            message: I18N.t('入库数量 {before} → {after}，批次剩余将变为 {remaining}。原始记录和更正原因都会保留。', {
+              before: qty(row.qty, row.unit), after: qty(newQty, row.unit), remaining: qty(proposedRemaining, row.unit)
+            }), options: [{ label: I18N.t('保存更正'), value: true, kind: 'primary' }, { label: I18N.t('取消'), value: null, kind: 'ghost' }]
+          }).then(function (ok) {
+            if (!ok) { return; }
+            return API.correctReceipt(row.id, { qty: newQty, expiry_date: expiry.value, note: note.value.trim() || null,
+              reason: reason.value.trim(), expected_revision: row.revision }).then(function () {
+              window.UI.toast(I18N.t('入库更正已保存'), 'success');
+              showDetail(row.id);
+            });
+          }).catch(function (err) {
+            if (!err || !err.silent) { window.UI.toast((err && err.message) || I18N.t('更正失败'), 'error'); }
+          }).then(function () { submit.disabled = false; });
+        });
+        content.appendChild(form);
+        var history = h('div', { class: 'receipt-audit' }, h('h3', {}, I18N.t('更正历史')));
+        if (!row.corrections.length) { history.appendChild(h('p', { class: 'page-hint' }, I18N.t('暂无更正记录'))); }
+        row.corrections.forEach(function (change) {
+          history.appendChild(h('article', { class: 'receipt-card' },
+            h('strong', {}, change.actor_name + ' · ' + fmtDateTime(change.created_at)),
+            h('p', {}, qty(change.old_qty, row.unit) + ' → ' + qty(change.new_qty, row.unit)),
+            h('p', {}, change.old_expiry_date + ' → ' + change.new_expiry_date),
+            h('p', {}, I18N.t('备注') + '：' + (change.old_note || '—') + ' → ' + (change.new_note || '—')),
+            h('p', {}, I18N.t('更正原因') + '：' + change.reason)
+          ));
+        });
+        content.appendChild(history);
+      }).catch(function (err) {
+        if (gen !== generation || (err && err.silent)) { return; }
+        content.innerHTML = '';
+        content.appendChild(window.UI.errorView(err.message || I18N.t('加载失败'), showList));
+      });
+    }
+    function showList() {
+      ++generation;
+      setBar(root, null);
+      content.innerHTML = '';
+      var search = h('input', { class: 'search-input', type: 'search', maxlength: '100', value: query, placeholder: I18N.t('搜索品名、入库人或备注'), 'aria-label': I18N.t('搜索入库记录') });
+      var form = h('form', { class: 'receipt-search' }, search, h('button', { class: 'btn btn-ghost', type: 'submit' }, I18N.t('查询')));
+      var list = h('div', { class: 'receipt-list' });
+      var more = h('button', { class: 'btn btn-ghost btn-block', hidden: 'hidden' }, I18N.t('加载更多'));
+      var offset = 0;
+      content.appendChild(form); content.appendChild(list); content.appendChild(more);
+      function load(reset) {
+        var gen = ++generation;
+        if (reset) { offset = 0; list.innerHTML = ''; }
+        more.disabled = true;
+        API.receipts(query, offset).then(function (result) {
+          if (gen !== generation) { return; }
+          if (!result.items.length && !offset) { list.appendChild(window.UI.emptyView(I18N.t('暂无入库记录'))); }
+          result.items.forEach(function (row) {
+            var button = h('button', { class: 'btn btn-ghost btn-block' }, I18N.t('查看与更正'));
+            button.addEventListener('click', function () { showDetail(row.id); });
+            list.appendChild(h('article', { class: 'receipt-card', 'data-receipt-id': row.id },
+              h('h3', {}, row.item_name),
+              h('p', {}, I18N.t('入库 {qty} · 批次剩余 {remaining}', { qty: qty(row.qty, row.unit), remaining: qty(row.remaining_qty, row.unit) })),
+              h('p', { class: 'page-hint' }, I18N.t('批次 #{id} · {name} · {time}', { id: row.id, name: row.received_by_name, time: fmtDateTime(row.received_at) })),
+              h('p', {}, I18N.t('效期：{date}', { date: row.expiry_date })),
+              row.note ? h('p', {}, row.note) : null, button
+            ));
+          });
+          offset += result.items.length;
+          more.hidden = !result.has_more;
+          more.disabled = false;
+        }).catch(function (err) {
+          if (gen !== generation || (err && err.silent)) { return; }
+          list.appendChild(window.UI.errorView(err.message || I18N.t('加载失败'), function () { load(true); }));
+          more.disabled = false;
+        });
+      }
+      form.addEventListener('submit', function (event) { event.preventDefault(); query = search.value.trim(); load(true); });
+      more.addEventListener('click', function () { load(false); });
+      load(true);
+    }
+    showList();
     return { root: root };
   }
 
@@ -3366,7 +3501,8 @@
     '/expiry': { render: renderExpiry },
     '/count-review': { render: renderCountReview, roles: ['manager', 'admin'] },
     '/waste-review': { render: renderWasteReview, roles: ['manager', 'admin'] },
-    '/receive': { render: renderStockReceive, roles: ['manager', 'admin'] },
+    '/receive': { render: renderStockReceive },
+    '/receipts': { render: renderReceipts },
     '/purchase': { render: renderPurchase, roles: ['manager', 'admin'] },
     '/items': { render: renderItems, roles: ['manager', 'admin'] },
     '/stock': { render: renderStock },

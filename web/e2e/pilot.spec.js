@@ -66,7 +66,7 @@ test.describe.serial('门店试运行浏览器流程', () => {
   test('两名店员独立提交每周盘点', async ({ page }) => {
     await login(page, 'staff', '3333');
     await expect(page.locator('.feat-card', { hasText: '采购' })).toHaveCount(0);
-    await expect(page.locator('.feat-card', { hasText: '直接增加库存批次' })).toHaveCount(0);
+    await expect(page.locator('.feat-card', { hasText: '登记到货、查询与更正' })).toHaveCount(0);
     await expect(page.locator('.feat-card', { hasText: '用户管理' })).toHaveCount(0);
     await expect(page.locator('.feat-card', { hasText: '每周盘点' })).toBeVisible();
     await page.locator('.feat-card', { hasText: '每日盘点' }).click();
@@ -219,7 +219,7 @@ test.describe.serial('门店试运行浏览器流程', () => {
     await expect(page.locator('.feat-card', { hasText: '盘点汇总' })).toHaveCount(0);
     await expect(page.locator('.dash-card', { hasText: '近3天盘点' })).toHaveCount(0);
     await expect(page.locator('.feat-card', { hasText: '采购' })).toBeVisible();
-    await expect(page.locator('.feat-card', { hasText: '直接增加库存批次' })).toBeVisible();
+    await expect(page.locator('.feat-card', { hasText: '登记到货、查询与更正' })).toBeVisible();
     await expect(page.locator('.feat-card', { hasText: '用户管理' })).toHaveCount(0);
 
     await expect(page.locator('.dash-card', { hasText: '今日盘点结果' })).toBeVisible();
@@ -426,6 +426,6 @@ test.describe.serial('门店试运行浏览器流程', () => {
     await login(page, 'shop_staff', '3333');
     await expect(page.locator('.home-user-name')).toHaveText('店员');
     await expect(page.locator('.feat-card', { hasText: '采购' })).toBeVisible();
-    await expect(page.locator('.feat-card', { hasText: '直接增加库存批次' })).toBeVisible();
+    await expect(page.locator('.feat-card', { hasText: '登记到货、查询与更正' })).toBeVisible();
   });
 });

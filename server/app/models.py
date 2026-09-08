@@ -97,6 +97,22 @@ class StockMovement(Base):
     batch: Mapped["Batch"] = relationship()
 
 
+class StockReceiptCorrection(Base):
+    __tablename__ = "stock_receipt_corrections"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    batch_id: Mapped[int] = mapped_column(ForeignKey("batches.id"), index=True)
+    old_qty: Mapped[float] = mapped_column(QuantityColumn)
+    new_qty: Mapped[float] = mapped_column(QuantityColumn)
+    old_expiry_date: Mapped[str] = mapped_column(String(10))
+    new_expiry_date: Mapped[str] = mapped_column(String(10))
+    old_note: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    new_note: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    reason: Mapped[str] = mapped_column(String(255))
+    actor_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class Purchase(Base):
     __tablename__ = "purchases"
 

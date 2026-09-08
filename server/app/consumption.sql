@@ -43,7 +43,7 @@ ordered AS (
 period_inputs AS (
   SELECT o.*, julianday(observed_at) - julianday(start_at) AS elapsed_days,
     coalesce((SELECT sum(m.delta) FROM stock_movements m
-      WHERE m.item_id = o.item_id AND m.operation IN ('stock_receive', 'purchase_receive')
+      WHERE m.item_id = o.item_id AND m.operation IN ('stock_receive', 'purchase_receive', 'stock_receive_correction')
         AND m.created_at > o.start_at AND m.created_at <= o.observed_at), 0) AS received,
     coalesce((SELECT sum(w.qty) FROM waste_records w
       WHERE w.item_id = o.item_id AND w.status = 'confirmed'
@@ -90,7 +90,7 @@ item_inputs AS (
     coalesce((SELECT sum(qty) FROM batches WHERE item_id = i.id AND expiry_date < date(:as_of, '+8 hours')), 0) AS expired_qty,
     coalesce((SELECT sum(qty) FROM batches WHERE item_id = i.id AND expiry_date <= date(:as_of, '+8 hours', '+3 days')), 0) AS expiring_qty,
     coalesce((SELECT sum(m.delta) FROM stock_movements m WHERE m.item_id = i.id
-      AND m.operation IN ('stock_receive', 'purchase_receive')
+      AND m.operation IN ('stock_receive', 'purchase_receive', 'stock_receive_correction')
       AND m.created_at > a.observed_at AND m.created_at <= :as_of), 0) AS received_since_count,
     coalesce((SELECT sum(w.qty) FROM waste_records w WHERE w.item_id = i.id AND w.status = 'confirmed'
       AND w.reported_at > a.observed_at AND w.reported_at <= :as_of), 0) AS waste_since_count,

@@ -221,6 +221,19 @@ class StockReceiveIn(BaseModel):
     note: Optional[str] = Field(default=None, max_length=255)
 
 
+class StockReceiptCorrectionIn(BaseModel):
+    qty: QuantityInput = Field(ge=0)
+    expiry_date: str
+    note: Optional[str] = Field(default=None, max_length=255)
+    reason: str = Field(min_length=1, max_length=255)
+    expected_revision: int = Field(ge=0)
+
+    @field_validator("expiry_date")
+    @classmethod
+    def _check_expiry(cls, value: str) -> str:
+        return _check_date(value)
+
+
 class ExpiryEntry(BaseModel):
     batch_id: int
     item_id: int

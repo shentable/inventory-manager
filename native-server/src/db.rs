@@ -2,7 +2,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use std::path::Path;
 use uuid::Uuid;
 
-pub const DB_SCHEMA: &str = "20260908_09";
+pub const DB_SCHEMA: &str = "20260908_10";
 
 pub fn open(path: &Path) -> rusqlite::Result<Connection> {
     if let Some(parent) = path.parent() {
@@ -50,6 +50,7 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             && v != "20260904_06"
             && v != "20260904_07"
             && v != "20260904_08"
+            && v != "20260908_09"
             && v != DB_SCHEMA
     }) {
         return Err(rusqlite::Error::InvalidQuery); // 不得静默降级未知的新 schema
@@ -145,14 +146,19 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         )
         .optional()?;
     conn.execute_batch("SAVEPOINT quantity_migration")?;
-    if existing_version.as_deref() != Some(DB_SCHEMA)
-        && recorded_schema.as_deref() != Some(DB_SCHEMA)
-    {
+    if !matches!(
+        existing_version.as_deref(),
+        Some("20260908_09" | "20260908_10")
+    ) && !matches!(
+        recorded_schema.as_deref(),
+        Some("20260908_09" | "20260908_10")
+    ) {
         if let Err(err) = conn.execute_batch(include_str!("../migrations/20260908_09.sql")) {
             conn.execute_batch("ROLLBACK TO quantity_migration; RELEASE quantity_migration")?;
             return Err(err);
         }
     }
+    conn.execute_batch(include_str!("../migrations/20260908_10.sql"))?;
     let store_id: Option<String> = conn
         .query_row("SELECT store_id FROM store_meta WHERE id=1", [], |row| {
             row.get(0)
@@ -203,6 +209,27 @@ pub fn bootstrap_admin(conn: &Connection, pin: Option<&str>) -> anyhow::Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn upgrading_tenths_does_not_scale_quantities_again() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        conn.execute_batch("UPDATE alembic_version SET version_num='20260908_09'; UPDATE store_meta SET schema_version='20260908_09'; INSERT INTO items(id,name,min_stock) VALUES(1,'Tenths',3);").unwrap();
+        migrate(&conn).unwrap();
+        migrate(&conn).unwrap();
+        assert_eq!(
+            conn.query_row("SELECT min_stock FROM items", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            3
+        );
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM stock_receipt_corrections", [], |r| {
+                r.get::<_, i64>(0)
+            })
+            .unwrap(),
+            0
+        );
+    }
 
     #[test]
     fn legacy_quantities_scale_once() {

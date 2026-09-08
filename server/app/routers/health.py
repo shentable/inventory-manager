@@ -13,7 +13,7 @@ router = APIRouter(prefix="/api", tags=["health"])
 
 
 API_VERSION = "1"
-DB_SCHEMA = "20260908_09"
+DB_SCHEMA = "20260908_10"
 
 
 @router.get("/health")

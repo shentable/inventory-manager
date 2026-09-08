@@ -31,8 +31,8 @@ Token 包含用户的 `token_version`。改 PIN、管理员重置 PIN、停用�
 
 角色：
 
-- `staff`：每日够/不够盘点、独立提交每周实数盘点、查看自己的三天记录、报损登记、库存与效期查看
-- `manager`：可独立提交每周盘点；可选择另外两人提交的记录进行比对确认；另有入库、报损核对、采购、库存品管理和流水查看
+- `staff`：每日够/不够盘点、独立提交每周实数盘点、查看自己的三天记录、报损登记、库存与效期查看、直接入库及本人入库查询更正
+- `manager`：可独立提交每周盘点；可选择另外两人提交的记录进行比对确认；另有入库及全部入库记录查询更正、报损核对、采购、库存品管理和流水查看
 - `admin`：拥有直接入库等管理权限，另负责用户管理和双人盘点确认；不提交每周盘点
 
 ## 核心数据
@@ -113,12 +113,23 @@ FEFO。业务单的核对/确认/取消用状态条件更新，因此重复或�
 - `GET /items?include_inactive=false`：每项附带最近一次有效盘点的 `last_count_at`、`last_count_qty`、`last_count_type`、`last_count_enough`；每日仅采用 `completed`，每周仅采用 `verified`，未填现场实数时数量为 `null`
 - `POST /items`、`PATCH /items/{id}`（manager+）：库存品包含 `daily_count_enabled`、`weekly_count_enabled` 两个布尔开关，均默认 `true`
 - `GET /stock`
-- `POST /stock/receive`（manager+）：`{items:[{item_id, qty, expiry_date}], note?}`，无需采购单直接创建入库批次
+- `POST /stock/receive`（staff+）：`{items:[{item_id, qty, expiry_date}], note?}`，无需采购单直接创建入库批次，记录实际入库人
+- `GET /stock/receipts?q=&limit=50&offset=0`：查询直接入库记录。店员只看自己的记录；店长、管理员看全部。`q` 匹配品名、入库人或备注；limit 范围 1–100，返回 `{items, has_more, limit, offset}`
+- `GET /stock/receipts/{batch_id}`：入库详情，包括原始数量、当前正确入库总量、批次余量、入库人、效期、备注、更正历史与 revision。无权查看的记录统一返回 404
+- `PATCH /stock/receipts/{batch_id}`：`{qty, expiry_date, note?, reason, expected_revision}`。权限与查询相同；qty 是正确的整笔入库数量，不是调整差额，支持 0.1。qty=0 用于撤销未扣减入库。商品与入库人不允许覆盖；商品选错可撤销后重新入库
 - `GET /items/{id}/batches`
 - `GET /items/{id}/movements`（manager+）：该库存品的审计流水
 - `GET /expiry?days=3`
 
 入库逐行创建 `source=receive` 批次并写正数 `stock_receive` 流水；库存数量也可通过采购入库、核对盘点或确认报损变化。系统不暴露覆盖库存余额的接口。
+
+入库更正保留原始 `Batch.initial_qty` 和 `stock_receive` 流水，在 `stock_receipt_corrections`
+保存数量、效期、备注前后值及操作人、原因、时间；单独追加 `stock_receive_correction`
+差额流水，并在同一事务中更新批次余量。仅修改效期/备注时流水差额为 0。
+版本过期、减少量超过批次余量均返回 409，不部分写入；后续确认盘点已经覆盖该库存品时，
+禁止直接更正原入库数量，仍可更正效期与备注。消耗看板把更正差额计入对应周期净入库，
+不重复计算原始入库。既有直接入库通过原流水识别入库人，自动出现在查询结果中。
+采购下单及采购收货维持原管理权限，本接口不用于更正采购单。
 
 ### 盘点
 

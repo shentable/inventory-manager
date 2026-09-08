@@ -105,6 +105,11 @@ pub fn router(state: AppState) -> Router {
         .route("/api/items/{id}/movements", get(item_movements))
         .route("/api/stock", get(stock))
         .route("/api/stock/receive", post(receive_stock))
+        .route("/api/stock/receipts", get(receipts))
+        .route(
+            "/api/stock/receipts/{id}",
+            get(receipt).patch(correct_receipt),
+        )
         .route("/api/expiry", get(expiry))
         .route("/api/dashboard", get(dashboard))
         .route("/api/consumption", get(consumption))
@@ -713,7 +718,7 @@ async fn receive_stock(
     Json(p): Json<StockReceiveIn>,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     let mut db = s.db.lock().unwrap();
-    let u = current_user(&db, &s.secret, &headers, Some("manager"), false)?;
+    let u = current_user(&db, &s.secret, &headers, Some("staff"), false)?;
     if p.items.is_empty() {
         return Err(ApiError::bad("入库条目不能为空"));
     }
@@ -791,6 +796,144 @@ async fn receive_stock(
     }
     Ok((StatusCode::CREATED, Json(Value::Array(batches))))
 }
+#[derive(Deserialize, Default)]
+struct ReceiptsQuery {
+    q: Option<String>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+}
+fn receipt_rows(
+    db: &Connection,
+    u: &User,
+    id: Option<i64>,
+    search: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<Value>, ApiError> {
+    let owner = if u.role == "staff" { Some(u.id) } else { None };
+    let mut st = db.prepare(include_str!("../../server/app/receipts.sql"))?;
+    let rows = st.query_map(rusqlite::named_params! {
+        ":owner": owner, ":batch_id": id, ":search": format!("%{search}%"), ":limit": limit, ":offset": offset,
+    }, |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>,_>>()?;
+    rows.into_iter()
+        .map(|r| serde_json::from_str(&r).map_err(|_| ApiError::bad("入库记录读取失败")))
+        .collect()
+}
+fn receipt_detail(db: &Connection, u: &User, id: i64) -> Result<Value, ApiError> {
+    receipt_rows(db, u, Some(id), "", 1, 0)?
+        .into_iter()
+        .next()
+        .ok_or_else(|| ApiError::not_found("入库记录不存在或无权查看"))
+}
+async fn receipts(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<ReceiptsQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let db = read_db(&s)?;
+    let u = current_user(&db, &s.secret, &headers, Some("staff"), false)?;
+    let limit = q.limit.unwrap_or(50);
+    let offset = q.offset.unwrap_or(0);
+    let search = q.q.unwrap_or_default();
+    if !(1..=100).contains(&limit) || offset < 0 || search.chars().count() > 100 {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "查询参数无效",
+        ));
+    }
+    let mut rows = receipt_rows(&db, &u, None, &search, limit + 1, offset)?;
+    let more = rows.len() > limit as usize;
+    rows.truncate(limit as usize);
+    Ok(Json(
+        json!({"items":rows,"has_more":more,"limit":limit,"offset":offset}),
+    ))
+}
+async fn receipt(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> Result<Json<Value>, ApiError> {
+    let db = read_db(&s)?;
+    let u = current_user(&db, &s.secret, &headers, Some("staff"), false)?;
+    Ok(Json(receipt_detail(&db, &u, id)?))
+}
+#[derive(Deserialize)]
+struct ReceiptCorrectionIn {
+    qty: Quantity,
+    expiry_date: String,
+    note: Option<String>,
+    reason: String,
+    expected_revision: i64,
+}
+async fn correct_receipt(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+    Json(p): Json<ReceiptCorrectionIn>,
+) -> Result<Json<Value>, ApiError> {
+    let mut db = s.db.lock().unwrap();
+    let u = current_user(&db, &s.secret, &headers, Some("staff"), false)?;
+    if p.reason.chars().count() > 255
+        || p.note.as_ref().is_some_and(|v| v.chars().count() > 255)
+        || p.expected_revision < 0
+        || p.expiry_date.len() != 10
+        || NaiveDate::parse_from_str(&p.expiry_date, "%Y-%m-%d").is_err()
+    {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "更正参数无效",
+        ));
+    }
+    let reason = p.reason.trim();
+    if reason.is_empty() {
+        return Err(ApiError::bad("请填写更正原因"));
+    }
+    let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let row = receipt_detail(&tx, &u, id)?;
+    if row["revision"].as_i64() != Some(p.expected_revision) {
+        return Err(ApiError::conflict("入库记录已被更正，请刷新后重试"));
+    }
+    let old_qty = Quantity((row["qty"].as_f64().unwrap() * 10.0).round() as i64);
+    let delta = p.qty - old_qty;
+    if delta != 0 && row["quantity_locked"] == true {
+        return Err(ApiError::conflict(
+            "入库后已有确认盘点，数量请通过重新盘点核实；仍可更正效期和备注",
+        ));
+    }
+    let remaining =
+        Quantity((row["remaining_qty"].as_f64().unwrap() * 10.0).round() as i64) + delta;
+    if remaining < 0 {
+        return Err(ApiError::conflict(
+            "更正数量小于该批次已扣减数量，请先核实库存",
+        ));
+    }
+    let note = p.note.as_deref().map(str::trim).filter(|v| !v.is_empty());
+    let old_note = row["note"].as_str();
+    let old_expiry = row["expiry_date"].as_str().unwrap();
+    if delta == 0 && p.expiry_date == old_expiry && note == old_note {
+        return Err(ApiError::bad("没有需要保存的更正"));
+    }
+    tx.execute("INSERT INTO stock_receipt_corrections(batch_id,old_qty,new_qty,old_expiry_date,new_expiry_date,old_note,new_note,reason,actor_id,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+        params![id,old_qty,p.qty,old_expiry,p.expiry_date,old_note,note,reason,u.id,now()])?;
+    let correction_id = tx.last_insert_rowid();
+    tx.execute(
+        "UPDATE batches SET qty=?1,expiry_date=?2,note=?3 WHERE id=?4",
+        params![remaining, p.expiry_date, note, id],
+    )?;
+    movement(
+        &tx,
+        row["item_id"].as_i64().unwrap(),
+        id,
+        delta,
+        "stock_receive_correction",
+        "receipt_correction",
+        Some(correction_id),
+        u.id,
+    )?;
+    tx.commit()?;
+    Ok(Json(receipt_detail(&db, &u, id)?))
+}
+
 #[derive(Deserialize, Default)]
 struct ExpiryQuery {
     days: Option<i64>,

@@ -24,7 +24,7 @@ def test_fresh_database_migration(monkeypatch, tmp_path):
         ).fetchone()
         assert meta is not None
         assert len(meta[0]) == 36
-        assert meta[1] == "20260908_09"
+        assert meta[1] == "20260908_10"
         count_columns = {row[1] for row in conn.execute("pragma table_info(count_sessions)")}
         entry_columns = {row[1] for row in conn.execute("pragma table_info(count_entries)")}
         assert "count_type" in count_columns
@@ -65,6 +65,26 @@ def test_legacy_database_migration(monkeypatch, tmp_path):
         assert {"must_change_pin", "token_version"} <= user_columns
         assert {"handled_by", "handled_at"} <= purchase_columns
         assert conn.execute("select count(*) from store_meta").fetchone()[0] == 1
+
+
+def test_receipt_audit_upgrade_keeps_tenths_and_blocks_history_loss(monkeypatch, tmp_path):
+    import pytest
+    path=tmp_path/'receipts.db'
+    monkeypatch.setenv('DATABASE_URL',f'sqlite:///{path}')
+    config=Config(str(Path(__file__).parents[1]/'alembic.ini'))
+    command.upgrade(config,'20260908_09')
+    with sqlite3.connect(path) as conn:
+        conn.execute("INSERT INTO items(id,name,category,unit,shelf_life_days,min_stock,active,sort_order,created_at,daily_count_enabled,weekly_count_enabled) VALUES(1,'小数','','kg',7,3,1,0,CURRENT_TIMESTAMP,1,1)")
+    command.upgrade(config,'head')
+    command.upgrade(config,'head')
+    with sqlite3.connect(path) as conn:
+        assert conn.execute('SELECT min_stock FROM items').fetchone()[0]==3
+        # Fixture writes intentionally omit FK parents: this tests the downgrade guard only.
+        conn.execute("INSERT INTO stock_receipt_corrections(batch_id,old_qty,new_qty,old_expiry_date,new_expiry_date,reason,actor_id,created_at) VALUES(1,12,8,'2099-01-01','2099-01-01','audit',1,CURRENT_TIMESTAMP)")
+    with pytest.raises(RuntimeError,match='审计记录'):
+        command.downgrade(config,'20260908_09')
+    with sqlite3.connect(path) as conn:
+        assert conn.execute('SELECT new_qty FROM stock_receipt_corrections').fetchone()[0]==8
 
 
 def test_quantity_migration_scales_history_once_and_refuses_lossy_downgrade(monkeypatch, tmp_path):
