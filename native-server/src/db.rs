@@ -27,6 +27,114 @@ fn has_column(conn: &Connection, table: &str, column: &str) -> rusqlite::Result<
     Ok(false)
 }
 
+// Narrowly widen the CHECK installed by the original SQLite bootstrap. Keep the
+// schema version: no column/API contract changes, and older binaries must still
+// be able to open the database (unknown roles already fail closed there).
+fn migrate_legacy_user_roles(conn: &Connection) -> rusqlite::Result<()> {
+    let sql: String = conn.query_row(
+        "SELECT sql FROM sqlite_schema WHERE type='table' AND name='users'",
+        [],
+        |r| r.get(0),
+    )?;
+    // Match only this complete CHECK, ignoring SQL whitespace and keyword case.
+    // Keep byte offsets to edit the original DDL without losing other checks,
+    // defaults, foreign keys, or AUTOINCREMENT. Quoted string contents stay exact.
+    let mut normalized = String::new();
+    let mut offsets = Vec::new();
+    let mut quoted = false;
+    for (offset, ch) in sql.char_indices() {
+        if ch == '\'' {
+            quoted = !quoted;
+        }
+        if quoted || !ch.is_ascii_whitespace() {
+            normalized.push(if quoted { ch } else { ch.to_ascii_lowercase() });
+            offsets.extend(std::iter::repeat_n(offset, ch.len_utf8()));
+        }
+    }
+    let old_check = "check(rolein('staff','manager','admin'))";
+    let Some(start) = normalized.find(old_check) else {
+        return Ok(());
+    };
+    let end = offsets[start + old_check.len() - 1] + 1;
+    let mut widened = sql.clone();
+    widened.replace_range(
+        offsets[start]..end,
+        "CHECK (role IN ('staff', 'manager', 'admin', 'owner_readonly'))",
+    );
+    let definition = &widened[widened.find('(').ok_or(rusqlite::Error::InvalidQuery)?..];
+    // SQLite's documented table-rebuild procedure requires FK enforcement off
+    // before BEGIN; never silently disable checks inside a caller's transaction.
+    if !conn.is_autocommit() {
+        return Err(rusqlite::Error::InvalidQuery);
+    }
+    let foreign_keys: bool = conn.pragma_query_value(None, "foreign_keys", |r| r.get(0))?;
+    let legacy_alter_table: bool =
+        conn.pragma_query_value(None, "legacy_alter_table", |r| r.get(0))?;
+    conn.pragma_update(None, "foreign_keys", false)?;
+    let result = (|| -> rusqlite::Result<()> {
+        // Views and triggers on other tables may refer to users. While the old
+        // table is dropped, disable ALTER's schema rewrite/validation; those
+        // references retain their original target name throughout the rebuild.
+        conn.pragma_update(None, "legacy_alter_table", true)?;
+        let tx = conn.unchecked_transaction()?;
+        let objects = {
+            let mut stmt = tx.prepare(
+                "SELECT sql FROM sqlite_schema WHERE tbl_name='users' AND type IN ('index','trigger') AND sql IS NOT NULL ORDER BY type,name",
+            )?;
+            stmt.query_map([], |r| r.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        let columns = {
+            let mut stmt = tx.prepare("PRAGMA table_info(users)")?;
+            stmt.query_map([], |r| r.get::<_, String>(1))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+                .into_iter()
+                .map(|name| format!("\"{}\"", name.replace('"', "\"\"")))
+                .collect::<Vec<_>>()
+                .join(",")
+        };
+        let autoincrement = sql.to_ascii_lowercase().contains("autoincrement");
+        let sequence = if autoincrement {
+            tx.query_row(
+                "SELECT seq FROM sqlite_sequence WHERE name='users'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .optional()?
+        } else {
+            None
+        };
+        tx.execute_batch(&format!(
+            "CREATE TABLE __users_owner_role_migration {definition};\
+             INSERT INTO __users_owner_role_migration ({columns}) SELECT {columns} FROM users;\
+             DROP TABLE users;\
+             ALTER TABLE __users_owner_role_migration RENAME TO users;"
+        ))?;
+        for object in objects {
+            tx.execute_batch(&object)?;
+        }
+        if autoincrement {
+            tx.execute("DELETE FROM sqlite_sequence WHERE name='users'", [])?;
+            if let Some(sequence) = sequence {
+                tx.execute(
+                    "INSERT INTO sqlite_sequence(name,seq) VALUES('users',?1)",
+                    [sequence],
+                )?;
+            }
+        }
+        // A failed check rolls the complete rebuild back, including indexes,
+        // triggers and sqlite_sequence. Existing references never get renamed.
+        if tx.prepare("PRAGMA foreign_key_check")?.exists([])? {
+            return Err(rusqlite::Error::InvalidQuery);
+        }
+        tx.commit()
+    })();
+    // Restore the caller's enforcement setting on both success and failure.
+    let restored_alter = conn.pragma_update(None, "legacy_alter_table", legacy_alter_table);
+    let restored_fk = conn.pragma_update(None, "foreign_keys", foreign_keys);
+    result.and(restored_alter).and(restored_fk)
+}
+
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     let existing_version: Option<String> = conn
         .query_row("SELECT version_num FROM alembic_version LIMIT 1", [], |r| {
@@ -67,6 +175,7 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             "ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0",
         )?;
     }
+    migrate_legacy_user_roles(conn)?;
     if !has_column(conn, "purchases", "handled_by")? {
         conn.execute_batch("ALTER TABLE purchases ADD COLUMN handled_by INTEGER")?;
     }
@@ -209,6 +318,235 @@ pub fn bootstrap_admin(conn: &Connection, pin: Option<&str>) -> anyhow::Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // The deployed bootstrap differs from the native fresh schema: AUTOINCREMENT,
+    // three CHECKs, strftime default, and both historical username indexes.
+    const LEGACY_USERS: &str = "
+        CREATE TABLE users (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          username TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL,
+          pin_hash TEXT NOT NULL,
+          role TEXT NOT NULL DEFAULT 'staff' CHECK (role IN ('staff', 'manager', 'admin')),
+          active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+          must_change_pin INTEGER NOT NULL DEFAULT 1 CHECK (must_change_pin IN (0, 1)),
+          token_version INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        );
+        CREATE INDEX idx_users_username ON users(username);
+        CREATE INDEX ix_users_username ON users(username);
+    ";
+
+    #[test]
+    fn deployed_users_check_upgrade_preserves_data_constraints_and_dependents() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(LEGACY_USERS).unwrap();
+        migrate(&conn).unwrap();
+        // Reproduce the existing deployed schema at the current schema version.
+        // migrate already widened it; reconstruct the fixture before populating.
+        conn.execute_batch("DROP TABLE users").unwrap();
+        conn.execute_batch(LEGACY_USERS).unwrap();
+        conn.execute_batch("
+            CREATE TABLE user_audit(user_id INTEGER REFERENCES users(id), action TEXT);
+            CREATE TRIGGER audit_user AFTER INSERT ON users BEGIN
+              INSERT INTO user_audit VALUES(new.id, 'created'); END;
+            CREATE VIEW user_names AS SELECT id,username FROM users;
+            CREATE TABLE external_events(user_id INTEGER REFERENCES users(id));
+            CREATE TRIGGER audit_event AFTER INSERT ON external_events BEGIN
+              INSERT INTO user_audit SELECT id,'event' FROM users WHERE id=new.user_id; END;
+            INSERT INTO users(id,username,display_name,pin_hash,role,active,must_change_pin,token_version,created_at)
+              VALUES(7,'legacy-admin','Original name','original-hash','admin',0,0,42,'2026-01-02T03:04:05.678Z');
+            INSERT INTO users(id,username,display_name,pin_hash) VALUES(100,'deleted','Deleted','x');
+            DELETE FROM user_audit WHERE user_id=100;
+            DELETE FROM users WHERE id=100;
+            INSERT INTO purchases(id,created_by) VALUES(4,7);
+        ").unwrap();
+        let before: String = conn.query_row("SELECT json_array(id,username,display_name,pin_hash,role,active,must_change_pin,token_version,created_at) FROM users WHERE id=7", [], |r| r.get(0)).unwrap();
+        let schema_objects = |conn: &Connection| {
+            conn.prepare("SELECT type,name,sql FROM sqlite_schema WHERE type IN ('index','trigger','view') ORDER BY type,name").unwrap()
+                .query_map([], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,Option<String>>(2)?))).unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>().unwrap()
+        };
+        let objects_before = schema_objects(&conn);
+        migrate(&conn).unwrap();
+        migrate(&conn).unwrap();
+        let after: String = conn.query_row("SELECT json_array(id,username,display_name,pin_hash,role,active,must_change_pin,token_version,created_at) FROM users WHERE id=7", [], |r| r.get(0)).unwrap();
+        assert_eq!(before, after);
+        assert_eq!(objects_before, schema_objects(&conn));
+        assert_eq!(
+            conn.query_row("SELECT created_by FROM purchases WHERE id=4", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            7
+        );
+        assert!(
+            !conn
+                .prepare("PRAGMA foreign_key_check")
+                .unwrap()
+                .exists([])
+                .unwrap()
+        );
+        assert!(
+            conn.pragma_query_value(None, "foreign_keys", |r| r.get::<_, bool>(0))
+                .unwrap()
+        );
+        assert!(
+            !conn
+                .pragma_query_value(None, "legacy_alter_table", |r| r.get::<_, bool>(0))
+                .unwrap()
+        );
+        conn.execute("INSERT INTO users(username,display_name,pin_hash,role) VALUES('owner','Owner','hash','owner_readonly')", []).unwrap();
+        let owner_id = conn.last_insert_rowid();
+        assert_eq!(owner_id, 101); // deleted IDs must not be reused
+        conn.execute("INSERT INTO external_events VALUES(?1)", [owner_id])
+            .unwrap();
+        assert_eq!(
+            conn.query_row(
+                "SELECT count(*) FROM user_audit WHERE user_id=?1",
+                [owner_id],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            2
+        );
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM user_names", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+        for sql in [
+            "UPDATE users SET role='superadmin' WHERE id=7",
+            "UPDATE users SET active=2 WHERE id=7",
+            "UPDATE users SET must_change_pin=2 WHERE id=7",
+            "UPDATE users SET username='owner' WHERE id=7",
+            "DELETE FROM users WHERE id=7",
+        ] {
+            assert!(conn.execute(sql, []).is_err(), "constraint lost: {sql}");
+        }
+        assert_eq!(
+            conn.query_row("SELECT version_num FROM alembic_version", [], |r| r
+                .get::<_, String>(0))
+                .unwrap(),
+            DB_SCHEMA
+        );
+        assert_eq!(
+            conn.query_row("SELECT schema_version FROM store_meta", [], |r| r
+                .get::<_, String>(0))
+                .unwrap(),
+            DB_SCHEMA
+        );
+    }
+
+    #[test]
+    fn empty_user_sequence_and_caller_pragmas_are_preserved() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(LEGACY_USERS).unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=OFF; PRAGMA legacy_alter_table=ON;
+            ALTER TABLE users ADD COLUMN supervisor_id INTEGER REFERENCES users(id);
+            ALTER TABLE users ADD COLUMN label TEXT GENERATED ALWAYS AS (username || ':' || role) VIRTUAL;").unwrap();
+        migrate_legacy_user_roles(&conn).unwrap();
+        assert_eq!(
+            conn.query_row(
+                "SELECT count(*) FROM sqlite_sequence WHERE name='users'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        assert!(
+            !conn
+                .pragma_query_value(None, "foreign_keys", |r| r.get::<_, bool>(0))
+                .unwrap()
+        );
+        assert!(
+            conn.pragma_query_value(None, "legacy_alter_table", |r| r.get::<_, bool>(0))
+                .unwrap()
+        );
+        conn.execute_batch("PRAGMA foreign_keys=ON;
+            INSERT INTO users(id,username,display_name,pin_hash,role,supervisor_id) VALUES(1,'owner','Owner','x','owner_readonly',1);").unwrap();
+        assert_eq!(
+            conn.query_row("SELECT label FROM users", [], |r| r.get::<_, String>(0))
+                .unwrap(),
+            "owner:owner_readonly"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT \"table\" FROM pragma_foreign_key_list('users')",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "users"
+        );
+        assert!(
+            conn.execute("UPDATE users SET supervisor_id=999", [])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn failed_user_role_rebuild_is_atomic_and_restores_pragmas() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(LEGACY_USERS).unwrap();
+        conn.execute_batch(
+            "PRAGMA foreign_keys=ON;
+            CREATE TABLE child(user_id INTEGER REFERENCES users(id));
+            INSERT INTO users(username,display_name,pin_hash) VALUES('staff','Staff','hash');
+            CREATE TRIGGER audit_user AFTER UPDATE ON users BEGIN SELECT 1; END;
+            PRAGMA foreign_keys=OFF;
+            INSERT INTO child VALUES(999);
+            PRAGMA foreign_keys=ON;",
+        )
+        .unwrap();
+        let ddl: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_schema WHERE name='users'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        // Integrity failure happens after DROP/RENAME/recreate, forcing rollback.
+        assert!(migrate_legacy_user_roles(&conn).is_err());
+        assert_eq!(
+            conn.query_row(
+                "SELECT sql FROM sqlite_schema WHERE name='users'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            ddl
+        );
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM users", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(conn.query_row("SELECT count(*) FROM sqlite_schema WHERE tbl_name='users' AND type IN ('index','trigger')", [], |r|r.get::<_,i64>(0)).unwrap(),4);
+        assert!(
+            conn.pragma_query_value(None, "foreign_keys", |r| r.get::<_, bool>(0))
+                .unwrap()
+        );
+        assert!(
+            !conn
+                .pragma_query_value(None, "legacy_alter_table", |r| r.get::<_, bool>(0))
+                .unwrap()
+        );
+        assert!(conn.is_autocommit());
+        assert!(
+            conn.execute("UPDATE users SET role='owner_readonly'", [])
+                .is_err()
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT seq FROM sqlite_sequence WHERE name='users'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            1
+        );
+    }
 
     #[test]
     fn upgrading_tenths_does_not_scale_quantities_again() {
