@@ -474,6 +474,22 @@ async fn update_user(
     let db = s.db.lock().unwrap();
     let admin = current_user(&db, &s.secret, &headers, Some("admin"), false)?;
     let old = user_by_id(&db, id)?.ok_or_else(|| ApiError::not_found("用户不存在"))?;
+    // Initial owner PINs are set by create_user. Existing owners must change
+    // their own PIN with the current PIN; role changes cannot bypass that rule.
+    if old.role == "owner_readonly"
+        && (p.pin.is_some() || p.role.as_ref().is_some_and(|role| role != &old.role))
+    {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "老板 PIN 仅能由本人修改，不能更改老板账号角色",
+        ));
+    }
+    if old.role != "owner_readonly" && p.role.as_deref() == Some("owner_readonly") {
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "请新建老板账号，不能将现有账号改为老板角色",
+        ));
+    }
     if id == admin.id && (p.active == Some(false) || p.role.is_some()) {
         return Err(ApiError::bad("不能停用自己或修改自己的角色"));
     }

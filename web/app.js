@@ -3389,7 +3389,6 @@
               options: [
                 { label: I18N.t('店员') + (u.role === 'staff' ? I18N.t('（当前）') : ''), value: 'staff', kind: u.role === 'staff' ? 'primary' : 'ghost' },
                 { label: I18N.t('店长') + (u.role === 'manager' ? I18N.t('（当前）') : ''), value: 'manager', kind: u.role === 'manager' ? 'primary' : 'ghost' },
-                { label: I18N.t('老板（只读）') + (u.role === 'owner_readonly' ? I18N.t('（当前）') : ''), value: 'owner_readonly', kind: u.role === 'owner_readonly' ? 'primary' : 'ghost' },
                 { label: I18N.t('管理员') + (u.role === 'admin' ? I18N.t('（当前）') : ''), value: 'admin', kind: u.role === 'admin' ? 'primary' : 'ghost' },
                 { label: I18N.t('取消'), value: null, kind: 'ghost' }
               ]
@@ -3421,7 +3420,7 @@
               h('div', { class: 'user-name' }, name, u.active === false ? h('span', { class: 'tag muted' }, ' ' + I18N.t('已停用')) : null),
               h('div', { class: 'user-sub' }, '@' + (u.username || '') + ' · ' + roleLabel(u.role))
             ),
-            h('div', { class: 'user-actions' }, roleBtn, editBtn, resetBtn, sw)
+            h('div', { class: 'user-actions' }, u.role === 'owner_readonly' ? h('span', { class: 'owner-note' }, I18N.t('老板 PIN 仅本人可修改')) : roleBtn, editBtn, u.role === 'owner_readonly' ? null : resetBtn, sw)
           );
           wrap.appendChild(card);
         });
@@ -3529,8 +3528,7 @@
     logout.addEventListener('click', function () { API.store.clear(); root.textContent = ''; location.hash = '#/login'; });
     root.appendChild(h('header', { class: 'owner-head' },
       h('div', {}, h('p', { class: 'owner-eyebrow' }, I18N.t('飨拓™库存管理')),
-        h('h1', {}, I18N.t(operationsView ? '经营明细' : ownerParams.item ? '材料消耗详情' : '材料消耗')), h('p', { class: 'owner-note' }, (user.display_name || user.username || '') + ' · ' + I18N.t('老板（只读）'))), logout));
-    root.appendChild(h('div', { class: 'owner-account' }, langChip(), h('a', { href: '#/change-pin' }, I18N.t('修改 PIN'))));
+        h('h1', {}, I18N.t(operationsView ? '经营明细' : ownerParams.item ? '材料消耗详情' : '材料消耗')), h('div', { class: 'owner-identity' }, h('p', { class: 'owner-note' }, (user.display_name || user.username || '') + ' · ' + I18N.t('老板（只读）')), h('a', { href: '#/change-pin' }, I18N.t('修改 PIN')))), h('div', { class: 'owner-head-actions' }, langChip(), logout)));
     var content = h('div', { 'aria-live': 'polite' }); root.appendChild(content);
     var generation = 0;
     var accountToken = API.store.getToken();
@@ -3590,37 +3588,71 @@
     function consumptionChart(model, unit, large) {
       if (!model.trendReady) { return note(I18N.t('至少3个有效周期后展示趋势')); }
       var points = model.points;
-      var width = 320, height = large ? 180 : 105, left = 34, right = 10, top = 18, bottom = large ? 38 : 20;
-      var plotH = height - top - bottom;
       var max = Math.max.apply(null, points.filter(function (p) { return p.valid; }).map(function (p) { return p.dailyRate; }).concat([0])) || 1;
-      var step = (width - left - right) / Math.max(points.length, 1);
-      var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-      svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
-      svg.setAttribute('role', 'img'); svg.setAttribute('class', 'owner-trend' + (large ? ' owner-trend-large' : ''));
-      svg.setAttribute('aria-label', I18N.t('各有效周期日均消耗趋势，虚线表示数据缺口'));
-      function element(tag, attrs, value) {
-        var el = document.createElementNS('http://www.w3.org/2000/svg', tag);
-        Object.keys(attrs).forEach(function (key) { el.setAttribute(key, attrs[key]); });
-        if (value !== undefined) { el.textContent = value; } svg.appendChild(el); return el;
+      function exact(value) { return value === null || value === undefined || !isFinite(Number(value)) ? '—' : Number(value).toLocaleString(I18N.getLang(), { maximumFractionDigits: 20 }); }
+      var readout = h('p', { class: 'owner-chart-readout', 'aria-live': 'polite' }); readout.hidden = !large;
+      var plot = h('div', { class: 'owner-bar-plot' + (large ? ' owner-bar-plot-large' : ''), role: 'group', 'aria-label': I18N.t('各有效周期日均消耗趋势，虚线表示数据缺口') });
+      function description(point) {
+        var dates = fullDate(point.start_at) + ' – ' + fullDate(point.end_at);
+        return dates + ' · ' + (point.valid ? I18N.t('日均 {qty}', { qty: exact(point.dailyRate) + ' ' + (unit || '') + I18N.t('/天') }) + ' · ' + I18N.t('周期消耗') + ' ' + exact(point.consumption) + ' ' + (unit || '') : I18N.t('数据缺口') + ' · ' + periodReason(point)) + (point.gapBefore ? ' · ' + I18N.t('与上一周期之间存在数据缺口') : '');
       }
-      element('title', {}, I18N.t('各有效周期日均消耗趋势，虚线表示数据缺口'));
-      element('line', { x1: left, x2: width - right, y1: top + plotH, y2: top + plotH, stroke: '#d8cfc4' });
-      element('text', { x: left - 6, y: top + 8, 'text-anchor': 'end', class: 'owner-chart-label' }, num(max));
-      element('text', { x: left - 6, y: top + plotH + 3, 'text-anchor': 'end', class: 'owner-chart-label' }, '0');
-      points.forEach(function (point, index) {
-        var x = left + index * step + step * .18, barW = Math.max(2, step * .64);
-        if (!point.valid) {
-          var gap = element('rect', { x: x, y: top + 4, width: barW, height: plotH - 4, rx: 3, fill: '#fcfaf7', stroke: '#b3a79b', 'stroke-dasharray': '4 4' });
-          var gapTitle = document.createElementNS('http://www.w3.org/2000/svg', 'title'); gapTitle.textContent = periodDates(point) + ' · ' + periodReason(point); gap.appendChild(gapTitle);
-        } else {
-          var barH = point.dailyRate / max * plotH;
-          var rect = element('rect', { x: x, y: top + plotH - Math.max(barH, 2), width: barW, height: Math.max(barH, 2), rx: 3, fill: index === points.length - 1 ? '#966d4f' : '#bba087' });
-          var title = document.createElementNS('http://www.w3.org/2000/svg', 'title'); title.textContent = periodDates(point) + ' · ' + qty(point.dailyRate, unit) + I18N.t('/天'); rect.appendChild(title);
-        }
-        if (point.gapBefore && index > 0) { element('line', { x1: x - step * .12, x2: x - step * .12, y1: top, y2: top + plotH, stroke: '#9e9184', 'stroke-dasharray': '3 4' }); }
-        if (large && (index === 0 || index === Math.floor(points.length / 2) || index === points.length - 1)) { element('text', { x: x + barW / 2, y: height - 18, 'text-anchor': 'middle', class: 'owner-chart-label' }, shortDate(point.end_at)); }
+      points.forEach(function (point) {
+        var button = h('button', { type: 'button', class: 'owner-bar-column' + (!point.valid ? ' is-gap' : '') + (point.gapBefore ? ' gap-before' : ''), 'aria-label': description(point), 'aria-pressed': 'false' },
+          h('strong', { class: 'owner-bar-value' }, point.valid ? (Math.abs(point.dailyRate) >= 10000 || Number(point.dailyRate.toFixed(2)) !== point.dailyRate ? '≈' : '') + (Math.abs(point.dailyRate) >= 10000 ? Number(point.dailyRate).toExponential(1) : num(point.dailyRate)) : I18N.t('缺口')),
+          h('span', { class: 'owner-bar-track', 'aria-hidden': 'true' }, h('span', { class: 'owner-bar-fill', style: 'height:' + (point.valid ? Math.max(1, point.dailyRate / max * 100) : 100) + '%' })),
+          h('span', { class: 'owner-bar-date' }, h('span', {}, shortDate(point.start_at)), h('span', {}, shortDate(point.end_at))));
+        function select() { Array.from(plot.children).forEach(function (el) { el.setAttribute('aria-pressed', el === button ? 'true' : 'false'); }); readout.textContent = description(point); readout.hidden = false; }
+        button.addEventListener('click', select); button.addEventListener('focus', select); plot.appendChild(button);
       });
-      return h('div', { class: 'owner-chart-wrap' }, svg, note(I18N.t('日均消耗 · {unit}/天 · 虚线为缺口', { unit: unit || '—' })));
+      if (points.length) { readout.textContent = description(points[points.length - 1]); plot.lastChild.setAttribute('aria-pressed', 'true'); }
+      var scroll = h('div', { class: 'owner-chart-scroll', tabindex: '0', 'aria-label': I18N.t('横向滚动查看全部周期') }, plot);
+      requestAnimationFrame(function () { scroll.scrollLeft = scroll.scrollWidth; });
+      return h('div', { class: 'owner-chart-wrap' }, note(I18N.t(large ? '日均消耗 · {unit}/天 · 虚线为缺口' : '日均 {unit}/天 · 点柱查看明细', { unit: unit || '—' })), scroll, readout);
+    }
+    function periodCount(item, model) {
+      var period = model.latest;
+      var value = period ? period.closing_qty : item.last_count_qty;
+      var present = typeof value === 'number' && isFinite(value);
+      var stamp = period ? period.end_at : item.last_count_at;
+      return h('div', { class: 'owner-confirmed-count' },
+        h('strong', {}, I18N.t(period ? '期末实盘' : '最近确认实盘') + ' · ' + (present ? qty(value, item.unit) : I18N.t('暂无'))),
+        stamp ? note(ownerTime(stamp) + ' · ' + I18N.t('盘点时点数量')) : null);
+    }
+    function dailyReference(item, data) {
+      var observations = data.counts && data.counts.daily_latest_by_item;
+      var available = Array.isArray(observations);
+      var latest = available ? observations.filter(function (row) { return row.item_id === item.item_id; })[0] : null;
+      var state = !available ? '暂不可用' : !latest ? '未反馈' : latest.is_enough === false ? '不够' : latest.is_enough === true ? '够' : '未反馈';
+      var box = h('section', { class: 'owner-daily-reference' + (latest && latest.is_enough === false ? ' is-shortage' : ''), 'aria-label': I18N.t('每日盘点补货参考') },
+        h('div', { class: 'owner-row' }, h('strong', {}, I18N.t('补货参考')), h('span', { class: 'owner-daily-state' }, I18N.t(state))));
+      if (latest) {
+        var reference = I18N.t(latest.business_date === data.business_date ? '今日反馈：{time}' : '上次反馈：{time}', { time: ownerTime(latest.created_at) });
+        if (typeof latest.reported_qty === 'number' && isFinite(latest.reported_qty)) {
+          reference += ' · ' + I18N.t('现场上报：{qty}', { qty: qty(latest.reported_qty, item.unit) });
+        }
+        box.appendChild(note(reference));
+      }
+      box.appendChild(note(I18N.t('仅供补货参考，不作为实际库存或消耗计算依据。')));
+      return box;
+    }
+    function latestCount(data) {
+      var latest = data.counts && data.counts.latest;
+      var box = h('section', { class: 'owner-latest-count', 'aria-label': I18N.t('最新盘点结果') }, h('h2', {}, I18N.t('最新盘点结果')));
+      if (!latest) { box.appendChild(note(I18N.t(latest === null ? '暂无盘点结果' : '这部分数据暂不可用，请刷新重试。'))); return box; }
+      var daily = latest.count_type === 'daily';
+      var heading = h('div', { class: 'owner-latest-heading' }, box.firstChild, note(ownerTime(latest.created_at) + ' · ' + I18N.t(daily ? '每日盘点' : '每周盘点') + ' · ' + status(latest.status))); box.appendChild(heading);
+      var preview = (latest.entries || []).slice(0, 2).map(function (entry) {
+        var actual = latest.status === 'verified' && entry.reviewed_qty !== null && entry.reviewed_qty !== undefined ? entry.reviewed_qty : entry.qty_counted;
+        return entry.item_name + ' ' + (daily ? (entry.is_enough === true ? I18N.t('够') : entry.is_enough === false ? I18N.t('不够') : I18N.t('待确认')) + (entry.reported_qty !== null && entry.reported_qty !== undefined ? ' ' + qty(entry.reported_qty, entry.unit) : '') : qty(actual, entry.unit));
+      });
+      if (preview.length) { box.appendChild(h('p', { class: 'owner-count-preview' }, preview.join(' · '))); }
+      var details = h('details', { class: 'owner-record' }, h('summary', {}, I18N.t('展开逐项盘点结果') + ' · ' + (latest.entries || []).length));
+      (latest.entries || []).forEach(function (entry) {
+        var actual = latest.status === 'verified' && entry.reviewed_qty !== null && entry.reviewed_qty !== undefined ? entry.reviewed_qty : entry.qty_counted;
+        details.appendChild(h('div', { class: 'owner-line' }, h('strong', {}, entry.item_name), note(daily ? (entry.is_enough === true ? I18N.t('够') : entry.is_enough === false ? I18N.t('不够') : I18N.t('待确认')) + ' · ' + I18N.t('现场数量：{qty}', { qty: qty(entry.reported_qty, entry.unit) }) : I18N.t('实盘数量：{qty}', { qty: qty(actual, entry.unit) }))));
+      });
+      if (latest.status === 'submitted') { details.appendChild(note(I18N.t('此盘点待确认，尚未更新确认实盘。'))); }
+      box.appendChild(details); return box;
     }
     function latestPeriodNotice(model) {
       return model.latest && model.points.length && model.points[model.points.length - 1] !== model.latest ? note(I18N.t('最近周期待核查，以下为最近有效周期')) : null;
@@ -3637,7 +3669,9 @@
         if (!selected) { content.appendChild(note(I18N.t('没有找到这项材料'))); return; }
         var row = selected.item, model = selected.model;
         content.appendChild(h('section', { class: 'owner-consumption-hero' }, note(row.category || I18N.t('未分类')), h('h2', {}, row.name), h('p', { class: 'owner-consumption-value' }, model.latest ? qty(model.latest.consumption, row.unit) : I18N.t('数据不足')), note(I18N.t('最近有效周期消耗（盘点推算）')), model.latest ? note(periodDates(model.latest) + ' · ' + I18N.t('日均 {qty}', { qty: qty(model.latest.dailyRate, row.unit) })) : note(I18N.t('需要两次有效盘点结果')), note(changeText(model, row.unit)), latestPeriodNotice(model)));
+        content.appendChild(periodCount(row, model));
         content.appendChild(consumptionChart(model, row.unit, true));
+        content.appendChild(dailyReference(row, data));
         content.appendChild(note(I18N.t('近8周完整盘点周期 · 有效 {valid} / 全部 {total}', { valid: model.validCount, total: model.totalCount })));
         var history = section('owner-consumption-periods', '逐周期消耗', [], function () {}); history.lastChild.remove();
         if (!model.points.length) { history.appendChild(note(I18N.t('暂无完整盘点周期'))); }
@@ -3651,45 +3685,110 @@
         });
         return;
       }
-      content.appendChild(h('section', { class: 'owner-consumption-intro' }, note(I18N.t('近8周盘点推算消耗 · 仅统计窗口内完整有效周期')), h('p', { class: 'owner-coverage' }, I18N.t('有有效消耗数据 {valid} / {total} 项材料', { valid: models.filter(function (m) { return m.model.validCount > 0; }).length, total: models.length })), note(I18N.t('实际覆盖时长因材料而异；各材料数量独立展示。'))));
+      content.appendChild(latestCount(data));
+      var coverageRow = h('div', { class: 'owner-coverage-row' }, h('p', { class: 'owner-coverage' }, I18N.t('近8周 · {valid}/{total}项有效', { valid: models.filter(function (m) { return m.model.validCount > 0; }).length, total: models.length })));
+      var explanation = h('details', { class: 'owner-scope-note' }, h('summary', {}, I18N.t('口径')), note(I18N.t('近8周盘点推算消耗 · 仅统计窗口内完整有效周期')), note(I18N.t('实际覆盖时长因材料而异；各材料数量独立展示。')));
+      content.appendChild(h('section', { class: 'owner-consumption-intro' }, coverageRow, explanation));
       var summary = data.summary || {};
       var issues = [];
       [['daily_shortages', '今日现场报缺'], ['expired_batches', '已过期批次'], ['overdue_counts', '超时未确认盘点'], ['overdue_waste', '超时未确认报损']].forEach(function (issue) { if (Number(summary[issue[0]]) > 0) { issues.push(I18N.t(issue[1]) + ' ' + num(summary[issue[0]])); } });
-      var ops = h('a', { class: 'owner-operations-link', href: '#/owner?view=operations' }, h('span', {}, I18N.t('经营明细') + ' →'), h('span', {}, issues.length ? issues.join(' · ') : I18N.t('库存 · 盘点 · 采购 · 报损 · 预测')));
+      var ops = h('a', { class: 'owner-operations-link', href: '#/owner?view=operations' }, h('span', {}, I18N.t('经营明细') + ' →'), h('span', {}, issues.length ? I18N.t('{n}类待关注', { n: issues.length }) : ''));
       content.appendChild(ops);
       var search = h('input', { class: 'search-input', type: 'search', placeholder: I18N.t('搜索材料或分类…'), 'aria-label': I18N.t('搜索材料或分类…') });
       var category = h('select', { class: 'owner-category', 'aria-label': I18N.t('材料分类') }, h('option', { value: '' }, I18N.t('全部分类')));
       Array.from(new Set(items.map(function (item) { return item.category || I18N.t('未分类'); }))).sort().forEach(function (name) { category.appendChild(h('option', { value: name }, name)); });
       content.appendChild(h('div', { class: 'owner-consumption-search' }, search, category));
+      var favoriteKey = data.store_id !== undefined && data.store_id !== null && user.id !== undefined ? 'owner-favorites:v1:' + encodeURIComponent(data.store_id) + ':' + encodeURIComponent(user.id) : null;
+      var favorites = [];
+      try { var saved = favoriteKey && JSON.parse(localStorage.getItem(favoriteKey) || '[]'); if (Array.isArray(saved)) { favorites = saved.filter(function (id) { return typeof id === 'string'; }); } } catch (e) { /* empty personal selection */ }
+      var favoritesOnly = false;
+      var favoriteToggle = h('button', { type: 'button', class: 'btn btn-ghost', 'aria-pressed': 'false' }, I18N.t('收藏'));
+      var editFavorites = h('button', { type: 'button', class: 'btn btn-ghost' }, I18N.t('编辑收藏'));
+      var favoriteEditor = h('div', { class: 'owner-favorite-editor', hidden: true });
+      favoriteToggle.addEventListener('click', function () { favoritesOnly = !favoritesOnly; filter = 'all'; Array.from(filters.children).forEach(function (el) { el.setAttribute('aria-pressed', String(el === favoriteToggle ? favoritesOnly : !favoritesOnly && el === filters.firstChild)); }); drawList(); });
+      editFavorites.addEventListener('click', function () {
+        favoriteEditor.textContent = ''; favoriteEditor.hidden = false; editFavorites.setAttribute('aria-expanded', 'true');
+        var draft = favorites.slice();
+        favoriteEditor.appendChild(note(I18N.t('仅此浏览器、此账号使用；不修改材料分类。')));
+        var choices = h('div', { class: 'owner-favorite-choices' });
+        items.forEach(function (item) {
+          var id = String(item.item_id), input = h('input', { type: 'checkbox' }); input.checked = draft.indexOf(id) >= 0;
+          input.addEventListener('change', function () { draft = draft.filter(function (value) { return value !== id; }); if (input.checked) { draft.push(id); } });
+          choices.appendChild(h('label', {}, input, h('span', {}, item.name), h('small', {}, item.category || I18N.t('未分类'))));
+        }); favoriteEditor.appendChild(choices);
+        var save = h('button', { type: 'button', class: 'btn btn-primary' }, I18N.t('保存'));
+        var cancel = h('button', { type: 'button', class: 'btn btn-ghost' }, I18N.t('取消'));
+        function close() { favoriteEditor.hidden = true; editFavorites.setAttribute('aria-expanded', 'false'); editFavorites.focus(); }
+        save.addEventListener('click', function () {
+          try { if (!favoriteKey) { throw new Error('missing account scope'); } localStorage.setItem(favoriteKey, JSON.stringify(draft)); }
+          catch (e) { window.UI.toast(I18N.t('无法保存收藏，请检查浏览器存储设置。'), 'error'); return; }
+          favorites = draft; drawList(); close();
+        }); cancel.addEventListener('click', close);
+        favoriteEditor.appendChild(h('div', { class: 'owner-favorite-actions' }, save, cancel)); var firstChoice = choices.querySelector('input'); if (firstChoice) { firstChoice.focus(); }
+      });
+      editFavorites.setAttribute('aria-expanded', 'false');
+      coverageRow.appendChild(editFavorites); content.appendChild(favoriteEditor);
       var filter = 'all';
       var filters = h('div', { class: 'owner-filters', role: 'group', 'aria-label': I18N.t('消耗趋势筛选') });
+      filters.appendChild(favoriteToggle);
       [['all','全部'],['up','上升'],['down','下降'],['insufficient','数据不足']].forEach(function (entry) {
         var button = h('button', { type: 'button', 'aria-pressed': entry[0] === filter ? 'true' : 'false' }, I18N.t(entry[1]));
-        button.addEventListener('click', function () { filter = entry[0]; Array.from(filters.children).forEach(function (el) { el.setAttribute('aria-pressed', el === button ? 'true' : 'false'); }); drawList(); }); filters.appendChild(button);
-      }); content.appendChild(filters);
+        button.addEventListener('click', function () { filter = entry[0]; favoritesOnly = false; Array.from(filters.children).forEach(function (el) { el.setAttribute('aria-pressed', el === button ? 'true' : 'false'); }); drawList(); }); filters.appendChild(button);
+      }); filters.insertBefore(filters.children[1], favoriteToggle); content.appendChild(filters);
       var list = h('div', { class: 'owner-consumption-list' }); content.appendChild(list);
       function drawList() {
         list.textContent = '';
         var query = search.value.trim().toLowerCase();
         var matches = models.filter(function (entry) {
           var item = entry.item, model = entry.model;
-          return (item.name + ' ' + (item.category || '')).toLowerCase().indexOf(query) >= 0 && (!category.value || (item.category || I18N.t('未分类')) === category.value) && (filter === 'all' || filter === 'insufficient' && model.validCount < 2 || filter === 'up' && (model.change.kind === 'up' || model.change.kind === 'from_zero') || filter === 'down' && model.change.kind === 'down');
+          return (item.name + ' ' + (item.category || '')).toLowerCase().indexOf(query) >= 0 && (!favoritesOnly || favorites.indexOf(String(item.item_id)) >= 0) && (!category.value || (item.category || I18N.t('未分类')) === category.value) && (filter === 'all' || filter === 'insufficient' && model.validCount < 2 || filter === 'up' && (model.change.kind === 'up' || model.change.kind === 'from_zero') || filter === 'down' && model.change.kind === 'down');
         });
-        if (!matches.length) { list.appendChild(note(I18N.t('没有匹配的材料'))); }
+        if (!matches.length) { list.appendChild(note(I18N.t(favoritesOnly && !favorites.length ? '暂无收藏，点击材料卡上的星标即可收藏。' : '没有匹配的材料'))); }
         matches.forEach(function (entry) {
           var item = entry.item, model = entry.model;
-          var card = h('a', { class: 'owner-consumption-card', href: '#/owner?item=' + encodeURIComponent(item.item_id) }, h('div', { class: 'owner-row' }, h('h3', {}, item.name), h('span', { class: 'owner-item-category' }, item.category || I18N.t('未分类'))));
+          var itemId = String(item.item_id);
+          var star = h('button', { type: 'button', class: 'owner-favorite-star' });
+          function updateStar() {
+            var selected = favorites.indexOf(itemId) >= 0;
+            star.textContent = '';
+            var icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            icon.setAttribute('viewBox', '0 0 24 24');
+            icon.setAttribute('aria-hidden', 'true');
+            icon.setAttribute('focusable', 'false');
+            var outline = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            outline.setAttribute('d', 'm12 3 2.78 5.63L21 9.54l-4.5 4.39 1.06 6.2L12 17.2l-5.56 2.93 1.06-6.2L3 9.54l6.22-.91L12 3Z');
+            icon.appendChild(outline); star.appendChild(icon);
+            star.setAttribute('aria-pressed', String(selected));
+            star.setAttribute('aria-label', I18N.t(selected ? '取消收藏 {name}' : '收藏 {name}', { name: item.name }));
+            star.title = I18N.t(selected ? '取消收藏' : '收藏');
+          }
+          updateStar();
+          star.addEventListener('click', function () {
+            var next = favorites.filter(function (id) { return id !== itemId; });
+            if (next.length === favorites.length) { next.push(itemId); }
+            try { if (!favoriteKey) { throw new Error('missing account scope'); } localStorage.setItem(favoriteKey, JSON.stringify(next)); }
+            catch (e) { window.UI.toast(I18N.t('无法保存收藏，请检查浏览器存储设置。'), 'error'); return; }
+            favorites = next;
+            // Close an older batch-edit draft so it cannot overwrite this click.
+            favoriteEditor.hidden = true; editFavorites.setAttribute('aria-expanded', 'false');
+            if (favoritesOnly) { drawList(); var nextStar = list.querySelector('.owner-favorite-star'); (nextStar || favoriteToggle).focus(); }
+            else { updateStar(); }
+          });
+          var card = h('article', { class: 'owner-consumption-card' }, h('div', { class: 'owner-row' }, h('h3', {}, item.name), h('div', { class: 'owner-card-actions' }, h('span', { class: 'owner-item-category' }, item.category || I18N.t('未分类')), star)));
+          var metrics = h('div', { class: 'owner-card-summary' });
+          var usage = h('div', { class: 'owner-card-usage' }, note(I18N.t('周期消耗（推算）')),
+            h('p', { class: model.latest ? 'owner-consumption-value' : 'owner-no-data' }, model.latest ? qty(model.latest.consumption, item.unit) : I18N.t('数据不足')));
+          if (model.latest) { usage.appendChild(note(periodDates(model.latest))); }
+          metrics.appendChild(usage); metrics.appendChild(periodCount(item, model)); card.appendChild(metrics);
           if (model.latest) {
-            card.appendChild(h('p', { class: 'owner-consumption-value' }, qty(model.latest.consumption, item.unit)));
-            card.appendChild(note(I18N.t('最近有效周期') + ' · ' + periodDates(model.latest)));
-            card.appendChild(note(I18N.t('日均 {qty}', { qty: qty(model.latest.dailyRate, item.unit) })));
-            card.appendChild(h('p', { class: 'owner-change' }, changeText(model, item.unit)));
-          } else { card.appendChild(h('p', { class: 'owner-no-data' }, I18N.t('数据不足'))); card.appendChild(note(I18N.t('暂无完整有效盘点周期'))); }
+            card.appendChild(h('p', { class: 'owner-change' }, I18N.t('日均 {qty}', { qty: qty(model.latest.dailyRate, item.unit) }) + (model.change.kind === 'no_comparison' ? '' : ' · ' + changeText(model, item.unit))));
+          }
           if (latestPeriodNotice(model)) { card.appendChild(latestPeriodNotice(model)); }
           if (model.trendReady) { card.appendChild(consumptionChart(model, item.unit, false)); }
-          else { card.appendChild(note(I18N.t(model.validCount === 1 ? '仅1个有效周期，暂不绘制趋势' : '至少3个有效周期后展示趋势'))); }
+          else { card.appendChild(note(I18N.t(model.validCount === 1 ? '仅1个有效周期，暂无趋势' : '暂无有效趋势'))); }
           if (model.points.some(function (point) { return !point.valid || point.gapBefore; })) { card.appendChild(note(I18N.t('存在数据缺口，查看周期详情'))); }
-          card.appendChild(h('span', { class: 'owner-detail-link' }, I18N.t('查看逐周期详情') + ' →')); list.appendChild(card);
+          card.appendChild(dailyReference(item, data));
+          card.appendChild(h('a', { class: 'owner-detail-link', href: '#/owner?item=' + encodeURIComponent(item.item_id) }, I18N.t('查看逐周期详情') + ' →')); list.appendChild(card);
         });
       }
       search.addEventListener('input', drawList); category.addEventListener('change', drawList); drawList();

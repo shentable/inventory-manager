@@ -709,3 +709,111 @@ body.offline-readonly #app { padding-top: 72px; }
 .owner-chart-label { font-size: 11px; }
 
 .owner-calculation[open] > summary::after { content: '−'; }
+
+/* Owner controls, personal favorites and readable period charts. */
+.owner-head { gap: 8px; margin-bottom: 0; }
+.owner-head-actions { display: flex; gap: 6px; flex-shrink: 0; align-items: center; }
+.owner-head-actions .btn, .owner-head-actions .chip { padding: 7px 9px; font-size: 12px; }
+.owner-account { margin: 0 0 4px; font-size: 12px; }
+.owner-account a { padding: 0 4px; }
+.owner-updated { border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; padding: 5px 0; gap: 6px; }
+.owner-updated .owner-note { font-size: 12px; margin: 0; }
+.owner-updated .btn { padding: 6px 8px; }
+.owner-latest-count { margin: 12px 0; padding: 14px; border: 1px solid #d9c8b6; background: #fffaf3; border-radius: 12px; }
+.owner-latest-count h2 { font-size: 18px; margin: 0; }
+.owner-latest-count .owner-record { margin: 6px 0 0; padding: 6px 10px; }
+.owner-confirmed-count { border-bottom: 1px solid #e5dbcf; padding: 10px 0; margin-bottom: 8px; }
+.owner-confirmed-count > strong { font-size: 14px; color: #5b4532; font-variant-numeric: tabular-nums; }
+.owner-confirmed-count .owner-note { font-size: 12px; margin: 2px 0 0; }
+.owner-favorite-toolbar, .owner-favorite-actions { display: flex; align-items: center; gap: 8px; margin: 10px 0; }
+.owner-favorite-toolbar .btn { padding: 8px 12px; font-size: 13px; }
+.owner-favorite-toolbar [aria-pressed=true] { color: #fff; background: #805b40; }
+.owner-favorite-toolbar > :last-child { margin-left: auto; }
+.owner-favorite-editor { border: 1px solid #d9c8b6; padding: 12px; border-radius: 12px; background: #fffaf6; margin-bottom: 14px; }
+.owner-favorite-editor[hidden] { display: none; }
+.owner-favorite-choices { max-height: 320px; overflow: auto; }
+.owner-favorite-choices label { display: flex; gap: 10px; align-items: center; min-height: 46px; border-bottom: 1px solid #e5dbcf; font-size: 14px; cursor: pointer; }
+.owner-favorite-choices input { width: 20px; height: 20px; flex-shrink: 0; accent-color: #805b40; }
+.owner-favorite-choices small { color: #766354; margin-left: auto; }
+.owner-favorite-actions .btn { flex: 1; }
+.owner-chart-scroll { max-width: 100%; overflow-x: auto; padding: 5px 3px; overscroll-behavior-x: contain; }
+.owner-bar-plot { display: flex; width: max-content; min-width: 100%; gap: 8px; }
+.owner-bar-column { display: flex; flex: 1 0 88px; flex-direction: column; gap: 6px; align-items: center; border: 1px solid transparent; border-radius: 7px; background: transparent; padding: 5px; color: #5b4532; cursor: pointer; font: inherit; }
+.owner-bar-column[aria-pressed=true] { border-color: #ab8669; background: #fbf3e9; }
+.owner-bar-value { font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.owner-bar-track { height: 78px; width: 36px; display: flex; align-items: flex-end; border-bottom: 1px solid #b9a38f; }
+.owner-bar-plot-large .owner-bar-track { height: 140px; }
+.owner-bar-fill { width: 100%; display: block; background: #aa8466; border-radius: 4px 4px 0 0; min-height: 2px; }
+.owner-bar-column.is-gap .owner-bar-fill { background: #fcfaf7; border: 1px dashed #9e9184; }
+.owner-bar-column.gap-before { border-left: 2px dashed #9e9184; }
+.owner-bar-date { font-size: 11px; white-space: nowrap; }
+.owner-chart-readout { min-height: 42px; margin: 6px 0 0; padding: 8px; border-radius: 6px; background: #f7f0e7; color: #5b4532; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.owner-page .owner-chart-scroll:focus-visible, .owner-page .owner-bar-column:focus-visible { outline: 3px solid #9d5328; outline-offset: 1px; }
+@media (max-width: 380px) { .owner-head h1 { font-size: 23px; } .owner-head-actions { gap: 3px; } .owner-head-actions .btn, .owner-head-actions .chip { padding: 5px 6px; } }
+.owner-identity { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.owner-identity .owner-note { margin: 0; }
+.owner-identity a { display: inline-flex; align-items: center; color: #805737; font-size: 12px; padding: 0 3px; }
+.owner-latest-count { padding: 10px 12px; }
+.owner-latest-count .owner-note { margin: 3px 0; font-size: 12px; }
+.owner-latest-count .owner-record { border: 0; background: transparent; padding: 0; margin: 0; }
+.owner-latest-count .owner-record summary { min-height: 36px; font-size: 12px; }
+.owner-count-preview { margin: 3px 0; font-size: 13px; color: #5b4532; line-height: 1.6; }
+.owner-consumption-intro { margin: 3px 0; position: relative; display: flex; align-items: center; gap: 6px; }
+.owner-coverage-row { display: flex; align-items: center; flex: 1; gap: 6px; min-width: 0; }
+.owner-consumption-intro .owner-coverage { font-size: 13px; margin: 0; line-height: 1.5; }
+.owner-coverage-row .btn { margin-left: auto; border: 0; background: transparent; font-size: 12px; padding: 0 5px; }
+.owner-scope-note { font-size: 12px; color: #805737; }
+.owner-scope-note summary { display: flex; align-items: center; min-height: 44px; cursor: pointer; }
+.owner-scope-note[open] { position: absolute; z-index: 2; top: 0; right: 0; background: #fffaf4; border: 1px solid #d9c8b6; padding: 0 10px 10px; border-radius: 8px; width: 260px; }
+.owner-operations-link { flex-direction: row; align-items: center; justify-content: space-between; border: 0; border-bottom: 1px solid var(--line); background: transparent; border-radius: 0; padding: 0 2px; gap: 8px; }
+.owner-operations-link > :first-child { font-size: 13px; }
+.owner-operations-link > :last-child { font-size: 12px; }
+.owner-consumption-search { margin: 8px 0; }
+.owner-filters { flex-wrap: nowrap; gap: 4px; margin: 0 0 8px; overflow-x: auto; }
+.owner-filters button { flex: 1 0 auto; padding: 5px 9px; font-size: 12px; }
+.owner-updated { padding: 0; }
+.owner-latest-count { margin: 7px 0; padding: 8px 10px; }
+.owner-latest-heading { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.owner-latest-heading h2 { font-size: 15px; }
+.owner-latest-heading .owner-note { font-size: 11px; margin: 0; }
+.owner-bar-plot { gap: 2px; }
+.owner-bar-column { flex: 1 0 44px; width: 44px; max-width: 64px; padding: 4px 1px; gap: 5px; }
+.owner-bar-value { font-size: 11px; max-width: 100%; }
+.owner-bar-track { width: 28px; }
+.owner-bar-date { font-size: 10px; line-height: 1.3; }
+.owner-bar-date span { display: block; }
+
+/* Daily feedback is visually separate from confirmed count and consumption. */
+.owner-daily-reference { margin-top: 12px; padding: 10px 12px; border: 1px solid #dfd8cc; border-radius: 10px; background: #f7f5ef; }
+.owner-daily-reference .owner-row { align-items: center; gap: 8px; }
+.owner-daily-reference strong, .owner-daily-state { font-size: 13px; }
+.owner-daily-reference .owner-note { margin: 4px 0 0; font-size: 12px; line-height: 1.55; }
+.owner-daily-reference .owner-note:last-child { color: #756d60; font-size: 11px; }
+.owner-daily-reference.is-shortage { border-color: #cf9f62; background: #fff5e7; }
+.owner-daily-reference.is-shortage .owner-daily-state { color: #8a4217; font-weight: 700; }
+
+.owner-card-actions { display: flex; align-items: center; gap: 5px; flex-shrink: 0; max-width: 48%; }
+.owner-favorite-star { flex-shrink: 0; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: #988675; font: inherit; line-height: 1; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.owner-favorite-star svg { width: 23px; height: 23px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.owner-favorite-star[aria-pressed=true] { color: #b8812e; }
+.owner-favorite-star[aria-pressed=true] svg { fill: #e5b65b; }
+.owner-favorite-star:hover { background: #f7efe4; }
+.owner-favorite-star:focus-visible { outline: 3px solid #9d5328; outline-offset: 1px; }
+
+/* Compact cards retain full figures and keep reference data separate. */
+.owner-consumption-card { padding: 12px 14px; }
+.owner-consumption-card h3 { font-size: 17px; }
+.owner-card-summary { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 14px; margin: 8px 0; }
+.owner-card-summary .owner-note { font-size: 12px; line-height: 1.5; margin: 2px 0; }
+.owner-card-summary .owner-consumption-value, .owner-card-summary .owner-no-data { font-size: 24px; margin: 4px 0; }
+.owner-card-summary .owner-confirmed-count { border: 0; border-left: 1px solid #e5dbcf; margin: 0; padding: 2px 0 0 14px; align-self: stretch; }
+.owner-card-summary .owner-confirmed-count > strong { display: block; font-size: 15px; line-height: 1.6; }
+.owner-consumption-card .owner-change { font-size: 12px; margin: 6px 0; }
+.owner-consumption-card > .owner-note { font-size: 12px; margin: 6px 0; }
+.owner-consumption-card .owner-chart-wrap { margin-top: 8px; }
+.owner-consumption-card .owner-bar-track { height: 60px; }
+.owner-chart-readout[hidden] { display: none; }
+.owner-consumption-card .owner-daily-reference { margin-top: 8px; padding: 8px 10px; }
+.owner-consumption-card .owner-daily-reference .owner-note { line-height: 1.45; margin-top: 3px; }
+.owner-consumption-card .owner-detail-link { min-height: 36px; font-size: 12px; }
+@media (max-width: 360px) { .owner-card-summary { gap: 8px; } .owner-card-summary .owner-confirmed-count { padding-left: 8px; } }
