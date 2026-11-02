@@ -336,7 +336,7 @@ async function serializeItem(env: Env, id: number) {
     unit: row.unit,
     shelf_life_days: row.shelf_life_days,
     min_stock: row.min_stock,
-    daily_count_enabled: asBool(row.daily_count_enabled),
+    daily_count_enabled: asBool(row.daily_count_enabled), daily_quantity_required: asBool(row.daily_quantity_required),
     weekly_count_enabled: asBool(row.weekly_count_enabled),
     active: asBool(row.active),
     sort_order: row.sort_order,
@@ -570,7 +570,7 @@ async function itemRoutes(request: Request, env: Env, url: URL): Promise<Respons
     const rows = (await env.DB.prepare(query).all<Record<string, unknown>>()).results.map((row) => ({
       id: row.id, name: row.name, category: row.category, unit: row.unit,
       shelf_life_days: row.shelf_life_days, min_stock: row.min_stock,
-      daily_count_enabled: asBool(row.daily_count_enabled), weekly_count_enabled: asBool(row.weekly_count_enabled),
+      daily_count_enabled: asBool(row.daily_count_enabled), daily_quantity_required: asBool(row.daily_quantity_required), weekly_count_enabled: asBool(row.weekly_count_enabled),
       active: asBool(row.active), sort_order: row.sort_order, stock: Number(row.stock),
       last_count_at: row.last_count_at ?? null,
       last_count_qty: row.last_count_qty === null || row.last_count_qty === undefined ? null : Number(row.last_count_qty),
@@ -589,14 +589,15 @@ async function itemRoutes(request: Request, env: Env, url: URL): Promise<Respons
       shelf: input.shelf_life_days === undefined ? 7 : integer(input.shelf_life_days, "保质期", 1),
       minimum: input.min_stock === undefined ? 0 : integer(input.min_stock, "安全线", 0),
       dailyCount: input.daily_count_enabled === undefined ? 1 : (input.daily_count_enabled ? 1 : 0),
+      dailyQuantityRequired: input.daily_quantity_required === undefined ? 0 : (input.daily_quantity_required ? 1 : 0),
       weeklyCount: input.weekly_count_enabled === undefined ? 1 : (input.weekly_count_enabled ? 1 : 0),
       order: input.sort_order === undefined ? 0 : integer(input.sort_order, "排序", -2_147_483_648),
     };
     try {
       const result = await env.DB.prepare(`
-        INSERT INTO items(name, category, unit, shelf_life_days, min_stock, daily_count_enabled, weekly_count_enabled, sort_order)
-        VALUES(?, ?, ?, ?, ?, ?, ?, ?)
-      `).bind(values.name, values.category, values.unit, values.shelf, values.minimum, values.dailyCount, values.weeklyCount, values.order).run();
+        INSERT INTO items(name, category, unit, shelf_life_days, min_stock, daily_count_enabled, daily_quantity_required, weekly_count_enabled, sort_order)
+        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(values.name, values.category, values.unit, values.shelf, values.minimum, values.dailyCount, values.dailyQuantityRequired, values.weeklyCount, values.order).run();
       return json(await serializeItem(env, Number(result.meta.last_row_id)), 201);
     } catch (error) {
       if (isUniqueError(error)) throw new ApiError(409, "库存品名称已存在");
@@ -618,6 +619,7 @@ async function itemRoutes(request: Request, env: Env, url: URL): Promise<Respons
       ["shelf_life_days", "shelf_life_days", (value) => integer(value, "保质期", 1)],
       ["min_stock", "min_stock", (value) => integer(value, "安全线", 0)],
       ["daily_count_enabled", "daily_count_enabled", (value) => value ? 1 : 0],
+      ["daily_quantity_required", "daily_quantity_required", (value) => value ? 1 : 0],
       ["weekly_count_enabled", "weekly_count_enabled", (value) => value ? 1 : 0],
       ["sort_order", "sort_order", (value) => integer(value, "排序", -2_147_483_648)],
       ["active", "active", (value) => value ? 1 : 0],
@@ -691,7 +693,7 @@ async function stockRoutes(request: Request, env: Env, url: URL): Promise<Respon
     await authenticate(request, env);
     const rows = (await env.DB.prepare(`
       SELECT i.id, i.name, i.category, i.unit, i.shelf_life_days, i.min_stock,
-             i.daily_count_enabled, i.weekly_count_enabled, i.active,
+             i.daily_count_enabled, i.daily_quantity_required, i.weekly_count_enabled, i.active,
              COALESCE(SUM(CASE WHEN b.qty > 0 THEN b.qty ELSE 0 END), 0) stock,
              MIN(CASE WHEN b.qty > 0 THEN b.expiry_date END) nearest_expiry,
              COUNT(CASE WHEN b.qty > 0 THEN 1 END) batch_count
@@ -701,7 +703,7 @@ async function stockRoutes(request: Request, env: Env, url: URL): Promise<Respon
     return json(rows.map((row) => ({
       item: { id: row.id, name: row.name, category: row.category, unit: row.unit,
         shelf_life_days: row.shelf_life_days, min_stock: row.min_stock,
-        daily_count_enabled: asBool(row.daily_count_enabled), weekly_count_enabled: asBool(row.weekly_count_enabled), active: true },
+        daily_count_enabled: asBool(row.daily_count_enabled), daily_quantity_required: asBool(row.daily_quantity_required), weekly_count_enabled: asBool(row.weekly_count_enabled), active: true },
       stock: Number(row.stock), nearest_expiry: row.nearest_expiry, batch_count: Number(row.batch_count),
     })));
   }
@@ -764,10 +766,11 @@ async function countRoutes(request: Request, env: Env, url: URL): Promise<Respon
     if (new Set(ids).size !== ids.length) throw new ApiError(400, "盘点条目重复");
     for (const entry of entries) {
       if (!await itemExists(env.DB, entry.item_id)) throw new ApiError(400, `库存品不存在：${entry.item_id}`);
-      const scope = await env.DB.prepare("SELECT name, daily_count_enabled, weekly_count_enabled FROM items WHERE id = ?").bind(entry.item_id).first<{ name: string; daily_count_enabled: number; weekly_count_enabled: number }>();
+      const scope = await env.DB.prepare("SELECT name, daily_count_enabled, daily_quantity_required, weekly_count_enabled FROM items WHERE id = ?").bind(entry.item_id).first<{ name: string; daily_count_enabled: number; daily_quantity_required: number; weekly_count_enabled: number }>();
       if (countType === "daily" && !asBool(scope!.daily_count_enabled)) throw new ApiError(400, `库存品未启用每日盘点：${scope!.name}`);
       if (countType === "weekly" && !asBool(scope!.weekly_count_enabled)) throw new ApiError(400, `库存品未启用每周盘点：${scope!.name}`);
       if (countType === "daily" && entry.enough === undefined) throw new ApiError(400, "每日盘点必须确认够或不够");
+      if (countType === "daily" && asBool(scope!.daily_quantity_required) && entry.qty === undefined) throw new ApiError(400, `每日盘点必须填写现场数量：${scope!.name}`);
       if (countType === "daily" && entry.enough === false && entry.qty === undefined) throw new ApiError(400, "每日盘点选择不够时必须填写现场数量");
       if (countType === "weekly" && entry.qty === undefined) throw new ApiError(400, "每周盘点必须填写盘点数量");
       if (countType === "weekly" && entry.enough !== undefined) throw new ApiError(400, "每周盘点必须填写实际数量");

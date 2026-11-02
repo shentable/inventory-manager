@@ -127,6 +127,7 @@ class ItemCreate(BaseModel):
     shelf_life_days: int = Field(default=7, ge=1)
     min_stock: QuantityInput = Field(default=0, ge=0)
     daily_count_enabled: bool = True
+    daily_quantity_required: bool = False
     weekly_count_enabled: bool = True
     sort_order: int = 0
 
@@ -138,6 +139,7 @@ class ItemUpdate(BaseModel):
     shelf_life_days: Optional[int] = Field(default=None, ge=1)
     min_stock: Optional[QuantityInput] = Field(default=None, ge=0)
     daily_count_enabled: Optional[bool] = None
+    daily_quantity_required: Optional[bool] = None
     weekly_count_enabled: Optional[bool] = None
     active: Optional[bool] = None
     sort_order: Optional[int] = None
@@ -151,6 +153,7 @@ class ItemOut(BaseModel):
     shelf_life_days: int
     min_stock: Quantity
     daily_count_enabled: bool
+    daily_quantity_required: bool
     weekly_count_enabled: bool
     active: bool
     sort_order: int
@@ -194,6 +197,7 @@ class StockItem(BaseModel):
     shelf_life_days: int
     min_stock: Quantity
     daily_count_enabled: bool
+    daily_quantity_required: bool
     weekly_count_enabled: bool
     active: bool
 

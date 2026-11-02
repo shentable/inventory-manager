@@ -437,7 +437,7 @@
   function renderDailyCount() {
     var root = h('div', { class: 'page daily-count-page' });
     root.appendChild(h('div', { class: 'page-title' }, I18N.t('每日盘点')));
-    root.appendChild(h('div', { class: 'daily-help' }, I18N.t('向左滑：不够（数量必填）　·　向右滑：够（数量选填）')));
+    root.appendChild(h('div', { class: 'daily-help' }, I18N.t('左滑不够 · 右滑够；数量要求见卡片')));
     var stage = h('div', { class: 'swipe-stage' });
     root.appendChild(stage);
 
@@ -460,11 +460,12 @@
           window.UI.toast(I18N.t('数量必须大于或等于 0，最多一位小数'), 'error');
           return;
         }
-        if (!enough && qty === null) {
+        if ((current.daily_quantity_required === true || !enough) && qty === null) {
           card.style.transform = '';
           card.style.setProperty('--swipe-yes-strength', 0);
           card.style.setProperty('--swipe-no-strength', 0);
-          window.UI.toast(I18N.t('选择不够时必须填写现场数量'), 'error');
+          window.UI.toast(I18N.t(current.daily_quantity_required === true ? '该品项每日盘点必须填写现场数量' : '选择不够时必须填写现场数量'), 'error');
+          card.querySelector('.swipe-qty-input').focus();
           return;
         }
         busy = true;
@@ -492,6 +493,16 @@
           ));
           var submit = h('button', { class: 'btn btn-primary btn-block' }, I18N.t('提交每日盘点'));
           submit.addEventListener('click', function () {
+            var missingIndex = items.findIndex(function (item, index) {
+              var answer = answers[index];
+              return !answer || ((item.daily_quantity_required === true || !answer.enough) && (answer.qty === undefined || answer.qty === null));
+            });
+            if (missingIndex >= 0) {
+              window.UI.toast(I18N.t('请填写必填品项的现场数量'), 'error');
+              answers = answers.slice(0, missingIndex);
+              paint();
+              return;
+            }
             submit.disabled = true;
             var payload = { count_type: 'daily', entries: answers };
             function save() { return API.createCount(payload); }
@@ -541,7 +552,8 @@
         var item = items[idx];
         var qtyInput = h('input', {
           class: 'swipe-qty-input', type: 'number', min: '0', step: '0.1',
-          inputmode: 'decimal', placeholder: I18N.t('不够必填，够可不填'),
+          inputmode: 'decimal', placeholder: I18N.t(item.daily_quantity_required === true ? '必填，可填 0' : '不够必填，够可不填'),
+          'aria-required': item.daily_quantity_required === true ? 'true' : 'false',
           'aria-label': I18N.t('{name}现场数量', { name: item.name })
         });
         if (qtyDrafts[item.id] !== undefined) { qtyInput.value = qtyDrafts[item.id]; }
@@ -575,7 +587,7 @@
           ),
           h('div', { class: 'swipe-unit' }, I18N.t('现场确认后向左或向右滑动')),
           h('label', { class: 'swipe-qty' },
-            h('span', {}, I18N.t('现场数量（不够必填，够选填）')),
+            h('span', {}, I18N.t(item.daily_quantity_required === true ? '现场数量（必填）' : '现场数量（不够必填，够选填）')),
             qtyInput,
             h('span', { class: 'swipe-qty-unit' }, item.unit || '')
           )
@@ -2887,6 +2899,8 @@
       var minInput = h('input', { class: 'input quantity-input', type: 'number', inputmode: 'decimal', min: '0', step: '0.1', placeholder: I18N.t('如：2'), value: item && item.min_stock !== null && item.min_stock !== undefined ? item.min_stock : '0' });
       var dailyCountInput = h('input', { type: 'checkbox' });
       var weeklyCountInput = h('input', { type: 'checkbox' });
+      var dailyQuantityInput = h('input', { type: 'checkbox', 'aria-label': I18N.t('每日盘点必须填写数量') });
+      dailyQuantityInput.checked = !!(item && item.daily_quantity_required === true);
       dailyCountInput.checked = item ? item.daily_count_enabled !== false : true;
       weeklyCountInput.checked = item ? item.weekly_count_enabled !== false : true;
 
@@ -2899,6 +2913,7 @@
         h('div', { class: 'count-scope-field' },
           h('div', { class: 'field-label' }, I18N.t('盘点范围')),
           h('label', { class: 'count-scope-option' }, dailyCountInput, h('span', {}, h('strong', {}, I18N.t('每日盘点')), h('small', {}, I18N.t('进入每日左右滑盘点')))),
+          h('label', { class: 'count-scope-option' }, dailyQuantityInput, h('span', {}, h('strong', {}, I18N.t('每日盘点必须填写数量')), h('small', {}, I18N.t('无论够或不够，均需填写现场数量（可填 0）')))),
           h('label', { class: 'count-scope-option' }, weeklyCountInput, h('span', {}, h('strong', {}, I18N.t('每周盘点')), h('small', {}, I18N.t('进入每周实数盘点'))))
         )
       );
@@ -2920,6 +2935,7 @@
           name: name, category: cat, unit: unit, shelf_life_days: shelf,
           min_stock: isNaN(min) || min < 0 ? 0 : min,
           daily_count_enabled: dailyCountInput.checked,
+          daily_quantity_required: dailyQuantityInput.checked,
           weekly_count_enabled: weeklyCountInput.checked
         };
         var p = isEdit ? API.updateItem(item.id, payload) : API.createItem(payload);

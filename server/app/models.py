@@ -57,6 +57,7 @@ class Item(Base):
     shelf_life_days: Mapped[int] = mapped_column(Integer, default=7)
     min_stock: Mapped[float] = mapped_column(QuantityColumn, default=0)
     daily_count_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    daily_quantity_required: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     weekly_count_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)

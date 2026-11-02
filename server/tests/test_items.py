@@ -12,6 +12,7 @@ def test_create_and_list_items(client, manager_token, auth, make_item, make_batc
     assert item["stock"] == 0
     assert item["shelf_life_days"] == 3
     assert item["unit"] == "袋"
+    assert item["daily_quantity_required"] is False
     assert item["daily_count_enabled"] is True
     assert item["weekly_count_enabled"] is True
 

@@ -24,7 +24,7 @@ def test_fresh_database_migration(monkeypatch, tmp_path):
         ).fetchone()
         assert meta is not None
         assert len(meta[0]) == 36
-        assert meta[1] == "20260908_10"
+        assert meta[1] == "20261102_11"
         count_columns = {row[1] for row in conn.execute("pragma table_info(count_sessions)")}
         entry_columns = {row[1] for row in conn.execute("pragma table_info(count_entries)")}
         assert "count_type" in count_columns
@@ -33,6 +33,7 @@ def test_fresh_database_migration(monkeypatch, tmp_path):
         assert "is_enough" in entry_columns
         assert "reported_qty" in entry_columns
         item_columns = {row[1] for row in conn.execute("pragma table_info(items)")}
+        assert "daily_quantity_required" in item_columns
         assert "daily_count_enabled" in item_columns
         assert "weekly_count_enabled" in item_columns
         assert "reviewed_qty" in entry_columns
@@ -79,6 +80,9 @@ def test_receipt_audit_upgrade_keeps_tenths_and_blocks_history_loss(monkeypatch,
     command.upgrade(config,'head')
     with sqlite3.connect(path) as conn:
         assert conn.execute('SELECT min_stock FROM items').fetchone()[0]==3
+        assert conn.execute('SELECT daily_quantity_required FROM items').fetchone()[0] == 0
+        conn.execute("INSERT INTO items(name,category,unit,shelf_life_days,min_stock,active,sort_order,created_at,daily_count_enabled,weekly_count_enabled) VALUES('默认值','','kg',7,3,1,0,CURRENT_TIMESTAMP,1,1)")
+        assert conn.execute("SELECT daily_quantity_required FROM items WHERE name='默认值'").fetchone()[0] == 0
         # Fixture writes intentionally omit FK parents: this tests the downgrade guard only.
         conn.execute("INSERT INTO stock_receipt_corrections(batch_id,old_qty,new_qty,old_expiry_date,new_expiry_date,reason,actor_id,created_at) VALUES(1,12,8,'2099-01-01','2099-01-01','audit',1,CURRENT_TIMESTAMP)")
     with pytest.raises(RuntimeError,match='审计记录'):

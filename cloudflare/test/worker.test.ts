@@ -68,7 +68,8 @@ describe("Workers + D1 inventory contract", () => {
 
     expect((await request("/purchases", "GET", staff)).status).toBe(403);
     const itemResponse = await request("/items", "POST", manager, { name: "测试吐司", unit: "片", shelf_life_days: 5, min_stock: 4 });
-    const item = await itemResponse.json() as { id: number };
+    const item = await itemResponse.json() as { id: number; daily_quantity_required: boolean };
+    expect(item.daily_quantity_required).toBe(false);
     const secondItemResponse = await request("/items", "POST", manager, { name: "测试火腿", unit: "片", shelf_life_days: 7, min_stock: 3 });
     const secondItem = await secondItemResponse.json() as { id: number };
 
@@ -105,6 +106,31 @@ describe("Workers + D1 inventory contract", () => {
     const duplicate = await request("/counts", "POST", staff, { count_type: "daily", entries: [{ item_id: item.id, enough: false, qty: 5 }] });
     expect(duplicate.status).toBe(409);
     expect(await duplicate.json()).toMatchObject({ detail: { code: "daily_count_exists" } });
+
+    // Item policy is authoritative even when clients omit or falsify it.
+    const requiredItemResponse = await request("/items", "POST", manager, { name: "现场数量必填", daily_quantity_required: true });
+    const requiredItem = await requiredItemResponse.json() as { id: number; daily_quantity_required: boolean };
+    expect(requiredItem.daily_quantity_required).toBe(true);
+    expect(await (await request("/items", "GET", staff)).json()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: requiredItem.id, daily_quantity_required: true }),
+    ]));
+    expect(await (await request("/stock", "GET", staff)).json()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ item: expect.objectContaining({ id: requiredItem.id, daily_quantity_required: true }) }),
+    ]));
+    for (const enough of [true, false]) {
+      for (const extra of [{}, { qty: null }, { daily_quantity_required: false }]) {
+        const denied = await request("/counts", "POST", staff, { count_type: "daily", entries: [{ item_id: requiredItem.id, enough, ...extra }] });
+        expect(denied.status).toBe(400);
+      }
+      const before = await (await request("/stock", "GET", staff)).json();
+      const accepted = await request("/counts", "POST", staff, { count_type: "daily", overwrite_daily: true, entries: [{ item_id: requiredItem.id, enough, qty: 0 }] });
+      expect(accepted.status).toBe(201);
+      expect(await accepted.json()).toMatchObject({ entries: [{ reported_qty: 0 }] });
+      expect(await (await request("/stock", "GET", staff)).json()).toEqual(before);
+    }
+    const disabledPolicy = await request(`/items/${requiredItem.id}`, "PATCH", manager, { daily_quantity_required: false });
+    expect(await disabledPolicy.json()).toMatchObject({ daily_quantity_required: false });
+    expect((await request("/counts", "POST", staff, { count_type: "daily", overwrite_daily: true, entries: [{ item_id: requiredItem.id, enough: true }] })).status).toBe(201);
 
     const numeric = await request("/counts", "POST", staff, { count_type: "weekly", entries: [{ item_id: item.id, qty: 8 }] });
     const numericCount = await numeric.json() as { id: number };

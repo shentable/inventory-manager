@@ -579,7 +579,7 @@ fn item_last_count(
     })
 }
 fn item_json(db: &Connection, id: i64) -> rusqlite::Result<Value> {
-    db.query_row("SELECT id,name,category,unit,shelf_life_days,min_stock,daily_count_enabled,weekly_count_enabled,active,sort_order FROM items WHERE id=?1",[id],|r|{let last=item_last_count(db,id)?;Ok(json!({"id":r.get::<_,i64>(0)?,"name":r.get::<_,String>(1)?,"category":r.get::<_,String>(2)?,"unit":r.get::<_,String>(3)?,"shelf_life_days":r.get::<_,i64>(4)?,"min_stock":r.get::<_,Quantity>(5)?,"daily_count_enabled":r.get::<_,bool>(6)?,"weekly_count_enabled":r.get::<_,bool>(7)?,"active":r.get::<_,bool>(8)?,"sort_order":r.get::<_,i64>(9)?,"stock":item_stock(db,id)?,"last_count_at":last.0,"last_count_qty":last.1,"last_count_type":last.2,"last_count_enough":last.3}))})
+    db.query_row("SELECT id,name,category,unit,shelf_life_days,min_stock,daily_count_enabled,weekly_count_enabled,active,sort_order,daily_quantity_required FROM items WHERE id=?1",[id],|r|{let last=item_last_count(db,id)?;Ok(json!({"id":r.get::<_,i64>(0)?,"name":r.get::<_,String>(1)?,"category":r.get::<_,String>(2)?,"unit":r.get::<_,String>(3)?,"shelf_life_days":r.get::<_,i64>(4)?,"min_stock":r.get::<_,Quantity>(5)?,"daily_count_enabled":r.get::<_,bool>(6)?,"weekly_count_enabled":r.get::<_,bool>(7)?,"active":r.get::<_,bool>(8)?,"sort_order":r.get::<_,i64>(9)?,"daily_quantity_required":r.get::<_,bool>(10)?,"stock":item_stock(db,id)?,"last_count_at":last.0,"last_count_qty":last.1,"last_count_type":last.2,"last_count_enough":last.3}))})
 }
 
 #[derive(Deserialize, Default)]
@@ -616,6 +616,7 @@ struct ItemCreate {
     shelf_life_days: Option<i64>,
     min_stock: Option<Quantity>,
     daily_count_enabled: Option<bool>,
+    daily_quantity_required: Option<bool>,
     weekly_count_enabled: Option<bool>,
     sort_order: Option<i64>,
 }
@@ -641,7 +642,7 @@ async fn create_item(
     {
         return Err(ApiError::conflict("库存品名称已存在"));
     }
-    db.execute("INSERT INTO items(name,category,unit,shelf_life_days,min_stock,daily_count_enabled,weekly_count_enabled,active,sort_order,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,1,?8,?9)",params![p.name,p.category.unwrap_or_default(),p.unit.unwrap_or_else(||"个".into()),p.shelf_life_days.unwrap_or(7),p.min_stock.unwrap_or_default(),p.daily_count_enabled.unwrap_or(true),p.weekly_count_enabled.unwrap_or(true),p.sort_order.unwrap_or(0),now()])?;
+    db.execute("INSERT INTO items(name,category,unit,shelf_life_days,min_stock,daily_count_enabled,weekly_count_enabled,active,sort_order,created_at,daily_quantity_required) VALUES(?1,?2,?3,?4,?5,?6,?7,1,?8,?9,?10)",params![p.name,p.category.unwrap_or_default(),p.unit.unwrap_or_else(||"个".into()),p.shelf_life_days.unwrap_or(7),p.min_stock.unwrap_or_default(),p.daily_count_enabled.unwrap_or(true),p.weekly_count_enabled.unwrap_or(true),p.sort_order.unwrap_or(0),now(),p.daily_quantity_required.unwrap_or(false)])?;
     let id = db.last_insert_rowid();
     Ok((StatusCode::CREATED, Json(item_json(&db, id)?)))
 }
@@ -653,6 +654,7 @@ struct ItemUpdate {
     shelf_life_days: Option<i64>,
     min_stock: Option<Quantity>,
     daily_count_enabled: Option<bool>,
+    daily_quantity_required: Option<bool>,
     weekly_count_enabled: Option<bool>,
     active: Option<bool>,
     sort_order: Option<i64>,
@@ -687,7 +689,7 @@ async fn update_item(
             return Err(ApiError::conflict("库存品名称已存在"));
         }
     }
-    db.execute("UPDATE items SET name=coalesce(?1,name),category=coalesce(?2,category),unit=coalesce(?3,unit),shelf_life_days=coalesce(?4,shelf_life_days),min_stock=coalesce(?5,min_stock),daily_count_enabled=coalesce(?6,daily_count_enabled),weekly_count_enabled=coalesce(?7,weekly_count_enabled),active=coalesce(?8,active),sort_order=coalesce(?9,sort_order) WHERE id=?10",params![p.name,p.category,p.unit,p.shelf_life_days,p.min_stock,p.daily_count_enabled,p.weekly_count_enabled,p.active,p.sort_order,id])?;
+    db.execute("UPDATE items SET name=coalesce(?1,name),category=coalesce(?2,category),unit=coalesce(?3,unit),shelf_life_days=coalesce(?4,shelf_life_days),min_stock=coalesce(?5,min_stock),daily_count_enabled=coalesce(?6,daily_count_enabled),weekly_count_enabled=coalesce(?7,weekly_count_enabled),active=coalesce(?8,active),sort_order=coalesce(?9,sort_order),daily_quantity_required=coalesce(?10,daily_quantity_required) WHERE id=?11",params![p.name,p.category,p.unit,p.shelf_life_days,p.min_stock,p.daily_count_enabled,p.weekly_count_enabled,p.active,p.sort_order,p.daily_quantity_required,id])?;
     Ok(Json(item_json(&db, id)?))
 }
 
@@ -724,8 +726,8 @@ async fn item_movements(
 async fn stock(State(s): State<AppState>, headers: HeaderMap) -> Result<Json<Value>, ApiError> {
     let db = read_db(&s)?;
     current_user(&db, &s.secret, &headers, Some("staff"), false)?;
-    let mut st=db.prepare("SELECT id,name,category,unit,shelf_life_days,min_stock,daily_count_enabled,weekly_count_enabled,active FROM items WHERE active=1 ORDER BY sort_order,id")?;
-    let rows=st.query_map([],|r|{let id:i64=r.get(0)?;let (qty,nearest,count):(Quantity,Option<String>,i64)=db.query_row("SELECT coalesce(sum(qty),0),min(CASE WHEN qty>0 THEN expiry_date END),coalesce(sum(CASE WHEN qty>0 THEN 1 ELSE 0 END),0) FROM batches WHERE item_id=?1",[id],|x|Ok((x.get(0)?,x.get(1)?,x.get(2)?)))?;Ok(json!({"item":{"id":id,"name":r.get::<_,String>(1)?,"category":r.get::<_,String>(2)?,"unit":r.get::<_,String>(3)?,"shelf_life_days":r.get::<_,i64>(4)?,"min_stock":r.get::<_,Quantity>(5)?,"daily_count_enabled":r.get::<_,bool>(6)?,"weekly_count_enabled":r.get::<_,bool>(7)?,"active":r.get::<_,bool>(8)?},"stock":qty,"nearest_expiry":nearest,"batch_count":count}))})?.collect::<Result<Vec<_>,_>>()?;
+    let mut st=db.prepare("SELECT id,name,category,unit,shelf_life_days,min_stock,daily_count_enabled,weekly_count_enabled,active,daily_quantity_required FROM items WHERE active=1 ORDER BY sort_order,id")?;
+    let rows=st.query_map([],|r|{let id:i64=r.get(0)?;let (qty,nearest,count):(Quantity,Option<String>,i64)=db.query_row("SELECT coalesce(sum(qty),0),min(CASE WHEN qty>0 THEN expiry_date END),coalesce(sum(CASE WHEN qty>0 THEN 1 ELSE 0 END),0) FROM batches WHERE item_id=?1",[id],|x|Ok((x.get(0)?,x.get(1)?,x.get(2)?)))?;Ok(json!({"item":{"id":id,"name":r.get::<_,String>(1)?,"category":r.get::<_,String>(2)?,"unit":r.get::<_,String>(3)?,"shelf_life_days":r.get::<_,i64>(4)?,"min_stock":r.get::<_,Quantity>(5)?,"daily_count_enabled":r.get::<_,bool>(6)?,"weekly_count_enabled":r.get::<_,bool>(7)?,"active":r.get::<_,bool>(8)?,"daily_quantity_required":r.get::<_,bool>(9)?},"stock":qty,"nearest_expiry":nearest,"batch_count":count}))})?.collect::<Result<Vec<_>,_>>()?;
     Ok(Json(Value::Array(rows)))
 }
 #[derive(Deserialize)]
@@ -1564,11 +1566,14 @@ async fn create_count(
         if !item_exists(&db, e.item_id)? {
             return Err(ApiError::bad(&format!("库存品不存在：{}", e.item_id)));
         }
-        let (name, daily_enabled, weekly_enabled): (String, bool, bool) = db.query_row(
-            "SELECT name,daily_count_enabled,weekly_count_enabled FROM items WHERE id=?1",
+        let (name, daily_enabled, weekly_enabled, daily_quantity_required): (String, bool, bool, bool) = db.query_row(
+            "SELECT name,daily_count_enabled,weekly_count_enabled,daily_quantity_required FROM items WHERE id=?1",
             [e.item_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )?;
+        if p.count_type == "daily" && daily_quantity_required && e.qty.is_none() {
+            return Err(ApiError::bad(&format!("每日盘点必须填写现场数量：{name}")));
+        }
         if p.count_type == "daily" && !daily_enabled {
             return Err(ApiError::bad(&format!("库存品未启用每日盘点：{name}")));
         }

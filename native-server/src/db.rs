@@ -2,7 +2,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use std::path::Path;
 use uuid::Uuid;
 
-pub const DB_SCHEMA: &str = "20260908_10";
+pub const DB_SCHEMA: &str = "20261102_11";
 
 pub fn open(path: &Path) -> rusqlite::Result<Connection> {
     if let Some(parent) = path.parent() {
@@ -159,6 +159,8 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             && v != "20260904_07"
             && v != "20260904_08"
             && v != "20260908_09"
+            && v != "20260908_10"
+            && v != "20261102_d1_06"
             && v != DB_SCHEMA
     }) {
         return Err(rusqlite::Error::InvalidQuery); // 不得静默降级未知的新 schema
@@ -257,10 +259,10 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch("SAVEPOINT quantity_migration")?;
     if !matches!(
         existing_version.as_deref(),
-        Some("20260908_09" | "20260908_10")
+        Some("20260908_09" | "20260908_10" | "20261102_11")
     ) && !matches!(
         recorded_schema.as_deref(),
-        Some("20260908_09" | "20260908_10")
+        Some("20260908_09" | "20260908_10" | "20261102_11")
     ) {
         if let Err(err) = conn.execute_batch(include_str!("../migrations/20260908_09.sql")) {
             conn.execute_batch("ROLLBACK TO quantity_migration; RELEASE quantity_migration")?;
@@ -268,6 +270,9 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         }
     }
     conn.execute_batch(include_str!("../migrations/20260908_10.sql"))?;
+    if !has_column(conn, "items", "daily_quantity_required")? {
+        conn.execute_batch(include_str!("../migrations/20261102_11.sql"))?;
+    }
     let store_id: Option<String> = conn
         .query_row("SELECT store_id FROM store_meta WHERE id=1", [], |row| {
             row.get(0)
@@ -546,6 +551,39 @@ mod tests {
             .unwrap(),
             1
         );
+    }
+
+    #[test]
+    fn daily_quantity_migration_preserves_existing_data_and_is_idempotent() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        conn.execute_batch("INSERT INTO users(id,username,display_name,pin_hash,role) VALUES(1,'preserve','Existing','unchanged-pin-hash','admin');
+            INSERT INTO items(id,name,min_stock) VALUES(1,'Existing kg',23);
+            INSERT INTO batches(item_id,qty,initial_qty,expiry_date,received_at,source) VALUES(1,123,123,'2030-01-01',CURRENT_TIMESTAMP,'init');
+            ALTER TABLE items DROP COLUMN daily_quantity_required;
+            UPDATE alembic_version SET version_num='20260908_10';
+            UPDATE store_meta SET schema_version='20260908_10';").unwrap();
+        migrate(&conn).unwrap();
+        assert!(!conn.query_row("SELECT daily_quantity_required FROM items", [], |r| r.get::<_, bool>(0)).unwrap());
+        conn.execute("UPDATE items SET daily_quantity_required=1", []).unwrap();
+        migrate(&conn).unwrap();
+        assert_eq!(conn.query_row("SELECT username,pin_hash FROM users", [], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?))).unwrap(), ("preserve".into(),"unchanged-pin-hash".into()));
+        assert_eq!(conn.query_row("SELECT min_stock,daily_quantity_required FROM items", [], |r| Ok((r.get::<_,i64>(0)?,r.get::<_,bool>(1)?))).unwrap(), (23,true));
+        assert_eq!(conn.query_row("SELECT qty,initial_qty FROM batches", [], |r| Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?))).unwrap(), (123,123));
+        assert_eq!(conn.query_row("SELECT count(*) FROM users", [], |r| r.get::<_,i64>(0)).unwrap(), 1);
+        assert_eq!(conn.query_row("SELECT count(*) FROM count_sessions", [], |r| r.get::<_,i64>(0)).unwrap(), 0);
+    }
+
+    #[test]
+    fn d1_daily_policy_import_preserves_flag_and_scales_whole_units_once() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        conn.execute_batch("INSERT INTO items(id,name,min_stock,daily_quantity_required) VALUES(1,'D1 whole units',2,1);
+            UPDATE alembic_version SET version_num='20261102_d1_06';
+            UPDATE store_meta SET schema_version='20261102_d1_06';").unwrap();
+        migrate(&conn).unwrap();
+        migrate(&conn).unwrap();
+        assert_eq!(conn.query_row("SELECT min_stock,daily_quantity_required FROM items", [], |r| Ok((r.get::<_,i64>(0)?,r.get::<_,bool>(1)?))).unwrap(), (20,true));
     }
 
     #[test]

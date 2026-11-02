@@ -86,6 +86,8 @@ def create_count(
             raise HTTPException(status_code=400, detail=f"库存品未启用每周盘点：{item.name}")
         if payload.count_type == "daily" and e.enough is None:
             raise HTTPException(status_code=400, detail="每日盘点必须确认够或不够")
+        if payload.count_type == "daily" and item.daily_quantity_required and e.qty is None:
+            raise HTTPException(status_code=400, detail=f"每日盘点必须填写现场数量：{item.name}")
         if payload.count_type == "daily" and e.enough is False and e.qty is None:
             raise HTTPException(status_code=400, detail="每日盘点选择不够时必须填写现场数量")
         if payload.count_type == "weekly" and e.qty is None:

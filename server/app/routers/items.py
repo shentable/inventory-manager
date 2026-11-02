@@ -46,6 +46,7 @@ def _serialize(db: Session, item: Item) -> ItemOut:
         shelf_life_days=item.shelf_life_days,
         min_stock=item.min_stock,
         daily_count_enabled=item.daily_count_enabled,
+        daily_quantity_required=item.daily_quantity_required,
         weekly_count_enabled=item.weekly_count_enabled,
         active=item.active,
         sort_order=item.sort_order,

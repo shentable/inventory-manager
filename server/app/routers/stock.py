@@ -105,6 +105,7 @@ def get_stock(
                     shelf_life_days=it.shelf_life_days,
                     min_stock=it.min_stock,
                     daily_count_enabled=it.daily_count_enabled,
+                    daily_quantity_required=it.daily_quantity_required,
                     weekly_count_enabled=it.weekly_count_enabled,
                     active=it.active,
                 ),
