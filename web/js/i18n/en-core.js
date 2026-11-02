@@ -1,6 +1,7 @@
 /* ===== 英文字典（通用/组件/API 层）：ui.js / api.js / index.html 用 ===== */
 /* key 为中文原文字符串；errcode.* 为后端 detail.code 映射 */
 window.I18N_EN_CORE = {
+  '请联网后重新获取看板数据': 'Connect to the network and fetch the overview again',
 
   /* ---------- 页面元信息（index.html） ---------- */
   '飨拓™': 'Shantech™',

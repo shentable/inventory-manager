@@ -1,4 +1,6 @@
 use crate::quantity::Quantity;
+#[path = "owner.rs"]
+mod owner;
 use axum::{
     Json, Router,
     body::{Body, to_bytes},
@@ -112,6 +114,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/expiry", get(expiry))
         .route("/api/dashboard", get(dashboard))
+        .route("/api/owner/dashboard", get(owner::dashboard))
         .route("/api/consumption", get(consumption))
         .route("/api/purchases", get(list_purchases).post(create_purchase))
         .route("/api/purchases/{id}/receive", post(receive_purchase))
@@ -129,6 +132,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/count-comparisons/{id}", get(count_comparison_detail))
         .fallback(static_asset)
         .layer(middleware::from_fn(etag_middleware))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            owner::restrict_owner,
+        ))
         .layer(DefaultBodyLimit::max(2_500_000))
         .layer(CompressionLayer::new())
         .layer(CorsLayer::permissive())
@@ -220,6 +227,10 @@ fn role_level(role: &str) -> i32 {
         "admin" => 2,
         _ => -1,
     }
+}
+
+fn valid_role(role: &str) -> bool {
+    role == "owner_readonly" || role_level(role) >= 0
 }
 
 #[derive(Clone)]
@@ -430,7 +441,7 @@ async fn create_user(
         return Err(ApiError::bad("用户资料格式错误"));
     }
     let role = p.role.unwrap_or_else(|| "staff".into());
-    if role_level(&role) < 0 {
+    if !valid_role(&role) {
         return Err(ApiError::bad("角色无效"));
     }
     if db
@@ -469,7 +480,7 @@ async fn update_user(
     if p.pin.as_ref().is_some_and(|v| !valid_pin(v)) {
         return Err(ApiError::bad("PIN 必须为 4-6 位数字"));
     }
-    if p.role.as_ref().is_some_and(|v| role_level(v) < 0) {
+    if p.role.as_ref().is_some_and(|v| !valid_role(v)) {
         return Err(ApiError::bad("角色无效"));
     }
     let username = p.username.map(|value| value.trim().to_lowercase());
@@ -992,7 +1003,10 @@ async fn consumption(
             "看板参数超出范围",
         ));
     }
-    let as_of = now();
+    Ok(Json(consumption_data(&db, &q, &now())?))
+}
+
+fn consumption_data(db: &Connection, q: &ConsumptionQuery, as_of: &str) -> Result<Value, ApiError> {
     let mut statement = db.prepare(include_str!("../../server/app/consumption.sql"))?;
     let rows = statement
         .query_map(
@@ -1010,10 +1024,10 @@ async fn consumption(
                 .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "统计数据错误"))
         })
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(Json(
+    Ok(
         json!({"as_of": as_of.replace(' ', "T") + "Z", "days": q.days,
         "lead_days": q.lead_days, "coverage_days": q.coverage_days, "items": items}),
-    ))
+    )
 }
 
 async fn dashboard(State(s): State<AppState>, headers: HeaderMap) -> Result<Json<Value>, ApiError> {

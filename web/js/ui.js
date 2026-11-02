@@ -594,9 +594,12 @@
       );
       document.body.appendChild(offlineEl);
     }
+    var owner = window.API && window.API.store && (window.API.store.getUser() || {}).role === 'owner_readonly';
+    var title = offlineEl.querySelector('.offline-title');
+    if (title) { title.textContent = t(owner ? '看板数据暂不可用' : '数据未同步 · 离线只读'); }
     var msg = offlineEl.querySelector('.offline-msg');
     if (msg) {
-      msg.textContent = lastSyncedAt
+      msg.textContent = owner ? t('请联网后重新获取看板数据') : lastSyncedAt
         ? t('当前显示本机缓存（上次同步 {time}），写操作已禁用', { time: new Date(lastSyncedAt).toLocaleString(curLang()) })
         : t('当前显示本机缓存，写操作已禁用');
     }

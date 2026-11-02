@@ -1,8 +1,8 @@
-const SHELL_CACHE = 'sandwich-shell-v31';
+const SHELL_CACHE = 'sandwich-shell-v33';
 const SHELL = [
   '/', '/index.html', '/config.js', '/styles.css', '/app.js',
   '/js/i18n.js', '/js/i18n/en-core.js', '/js/i18n/en-app.js',
-  '/js/api.js', '/js/ui.js', '/manifest.json',
+  '/js/api.js', '/js/ui.js', '/js/owner-consumption.js', '/manifest.json',
   '/shantech-logo-192.png', '/shantech-logo-512.png', '/github-mark.svg'
 ];
 

@@ -96,7 +96,15 @@
         if (u) { localStorage.setItem(USER_KEY, JSON.stringify(u)); } else { localStorage.removeItem(USER_KEY); }
       } catch (e) { /* ignore */ }
     },
-    clear: function () { this.setToken(''); this.setUser(null); }
+    clear: function () {
+      var prefix = CACHE_PREFIX + tokenScope() + ':';
+      try {
+        Object.keys(localStorage).forEach(function (key) {
+          if (key.indexOf(prefix) === 0) { localStorage.removeItem(key); }
+        });
+      } catch (e) { /* ignore */ }
+      this.setToken(''); this.setUser(null);
+    }
   };
 
   var connectivity = {
@@ -149,7 +157,8 @@
     opts = opts || {};
     var method = opts.method || 'GET';
     var isGet = method === 'GET';
-    var cached = isGet ? readCache(path) : null;
+    var noCache = opts.noCache || path.indexOf('/owner/') === 0 || path === '/auth/me';
+    var cached = isGet && !noCache ? readCache(path) : null;
     if (!isGet && !connectivity.online) { return Promise.reject(offlineError()); }
     var headers = { 'Content-Type': 'application/json' };
     var token = store.getToken();
@@ -204,9 +213,9 @@
           err.detail = data && data.detail;
           throw err;
         }
-        if (isGet) {
+        if (isGet && !noCache && token === store.getToken()) {
           writeCache(path, res.headers.get('ETag'), data);
-        } else {
+        } else if (!isGet) {
           invalidateCache();
         }
         if (!opts.revalidate) { markOnline(); }
@@ -269,6 +278,7 @@
     changePin: function (currentPin, newPin) {
       return request('/auth/change-pin', { method: 'POST', body: { current_pin: currentPin, new_pin: newPin } });
     },
+    ownerDashboard: function () { return request('/owner/dashboard', { noCache: true, noFallback: true }); },
     dashboard: function () { return request('/dashboard'); },
     consumption: function (days, leadDays, coverageDays) {
       return request('/consumption?days=' + days + '&lead_days=' + leadDays + '&coverage_days=' + coverageDays);
