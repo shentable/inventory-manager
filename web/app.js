@@ -3776,9 +3776,9 @@
           });
           var card = h('article', { class: 'owner-consumption-card' }, h('div', { class: 'owner-row' }, h('h3', {}, item.name), h('div', { class: 'owner-card-actions' }, h('span', { class: 'owner-item-category' }, item.category || I18N.t('未分类')), star)));
           var metrics = h('div', { class: 'owner-card-summary' });
-          var usage = h('div', { class: 'owner-card-usage' }, note(I18N.t('周期消耗（推算）')),
-            h('p', { class: model.latest ? 'owner-consumption-value' : 'owner-no-data' }, model.latest ? qty(model.latest.consumption, item.unit) : I18N.t('数据不足')));
-          if (model.latest) { usage.appendChild(note(periodDates(model.latest))); }
+          var usage = h('div', { class: 'owner-card-usage' }, note(I18N.t('月消耗（推算）')),
+            h('p', { class: model.latest ? 'owner-consumption-value' : 'owner-no-data' }, model.latest ? qty(model.latest.dailyRate * 30, item.unit) : I18N.t('数据不足')));
+          if (model.latest) { usage.appendChild(note(I18N.t('按30天/月折算'))); }
           metrics.appendChild(usage); metrics.appendChild(periodCount(item, model)); card.appendChild(metrics);
           if (model.latest) {
             card.appendChild(h('p', { class: 'owner-change' }, I18N.t('日均 {qty}', { qty: qty(model.latest.dailyRate, item.unit) }) + (model.change.kind === 'no_comparison' ? '' : ' · ' + changeText(model, item.unit))));

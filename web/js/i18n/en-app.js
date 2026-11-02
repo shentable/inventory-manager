@@ -2,7 +2,8 @@
 /* 与 en-core.js 的 key 不得重复（重复时 en-app 优先并 console.warn） */
 window.I18N_EN_APP = {
   "日均 {unit}/天 · 点柱查看明细": "Daily {unit}/day · Tap a bar for details",
-  "周期消耗（推算）": "Period use (estimated)",
+  "月消耗（推算）": "Monthly use (estimated)",
+  "按30天/月折算": "Based on a 30-day month",
   "仅1个有效周期，暂无趋势": "Only 1 valid period; no trend yet",
   "暂无有效趋势": "No valid trend yet",
   "收藏": "Favorites",
