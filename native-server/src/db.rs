@@ -564,14 +564,51 @@ mod tests {
             UPDATE alembic_version SET version_num='20260908_10';
             UPDATE store_meta SET schema_version='20260908_10';").unwrap();
         migrate(&conn).unwrap();
-        assert!(!conn.query_row("SELECT daily_quantity_required FROM items", [], |r| r.get::<_, bool>(0)).unwrap());
-        conn.execute("UPDATE items SET daily_quantity_required=1", []).unwrap();
+        assert!(
+            !conn
+                .query_row("SELECT daily_quantity_required FROM items", [], |r| r
+                    .get::<_, bool>(0))
+                .unwrap()
+        );
+        conn.execute("UPDATE items SET daily_quantity_required=1", [])
+            .unwrap();
         migrate(&conn).unwrap();
-        assert_eq!(conn.query_row("SELECT username,pin_hash FROM users", [], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?))).unwrap(), ("preserve".into(),"unchanged-pin-hash".into()));
-        assert_eq!(conn.query_row("SELECT min_stock,daily_quantity_required FROM items", [], |r| Ok((r.get::<_,i64>(0)?,r.get::<_,bool>(1)?))).unwrap(), (23,true));
-        assert_eq!(conn.query_row("SELECT qty,initial_qty FROM batches", [], |r| Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?))).unwrap(), (123,123));
-        assert_eq!(conn.query_row("SELECT count(*) FROM users", [], |r| r.get::<_,i64>(0)).unwrap(), 1);
-        assert_eq!(conn.query_row("SELECT count(*) FROM count_sessions", [], |r| r.get::<_,i64>(0)).unwrap(), 0);
+        assert_eq!(
+            conn.query_row("SELECT username,pin_hash FROM users", [], |r| Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?
+            )))
+            .unwrap(),
+            ("preserve".into(), "unchanged-pin-hash".into())
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT min_stock,daily_quantity_required FROM items",
+                [],
+                |r| Ok((r.get::<_, i64>(0)?, r.get::<_, bool>(1)?))
+            )
+            .unwrap(),
+            (23, true)
+        );
+        assert_eq!(
+            conn.query_row("SELECT qty,initial_qty FROM batches", [], |r| Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?
+            )))
+            .unwrap(),
+            (123, 123)
+        );
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM users", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM count_sessions", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
     }
 
     #[test]
@@ -583,7 +620,15 @@ mod tests {
             UPDATE store_meta SET schema_version='20261102_d1_06';").unwrap();
         migrate(&conn).unwrap();
         migrate(&conn).unwrap();
-        assert_eq!(conn.query_row("SELECT min_stock,daily_quantity_required FROM items", [], |r| Ok((r.get::<_,i64>(0)?,r.get::<_,bool>(1)?))).unwrap(), (20,true));
+        assert_eq!(
+            conn.query_row(
+                "SELECT min_stock,daily_quantity_required FROM items",
+                [],
+                |r| Ok((r.get::<_, i64>(0)?, r.get::<_, bool>(1)?))
+            )
+            .unwrap(),
+            (20, true)
+        );
     }
 
     #[test]
