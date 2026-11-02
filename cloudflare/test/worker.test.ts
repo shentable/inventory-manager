@@ -21,7 +21,22 @@ async function login(username: string, pin: string) {
 
 describe("Workers + D1 inventory contract", () => {
   beforeAll(async () => {
+    await applyD1Migrations(testEnv.DB, testEnv.TEST_MIGRATIONS.slice(0,-1));
+    await testEnv.DB.batch([
+      testEnv.DB.prepare("INSERT INTO users(id,username,display_name,pin_hash,role) VALUES(9001,'migration_fixture','保留账号','hash-unchanged','manager')"),
+      testEnv.DB.prepare("INSERT INTO items(id,name) VALUES(9001,'migration_fixture')"),
+      testEnv.DB.prepare("INSERT INTO batches(id,item_id,qty,initial_qty,expiry_date) VALUES(9001,9001,3,5,'2000-01-01')"),
+      testEnv.DB.prepare("INSERT INTO stock_movements(item_id,batch_id,delta,operation,reference_type,actor_id) VALUES(9001,9001,5,'receive','manual',9001)"),
+    ]);
     await applyD1Migrations(testEnv.DB, testEnv.TEST_MIGRATIONS);
+    expect(await testEnv.DB.prepare("SELECT qty,initial_qty,expiry_date FROM batches WHERE id=9001").first()).toMatchObject({qty:3,initial_qty:5,expiry_date:'2000-01-01'});
+    expect((await testEnv.DB.prepare("PRAGMA foreign_key_check").all()).results).toEqual([]);
+    await testEnv.DB.batch([
+      testEnv.DB.prepare("DELETE FROM stock_movements WHERE item_id=9001"),
+      testEnv.DB.prepare("DELETE FROM batches WHERE item_id=9001"),
+      testEnv.DB.prepare("DELETE FROM items WHERE id=9001"),
+      testEnv.DB.prepare("DELETE FROM users WHERE id=9001"),
+    ]);
   });
 
   it("runs bootstrap, role, inventory, waste, count and ETag flows", async () => {
@@ -189,4 +204,31 @@ describe("Workers + D1 inventory contract", () => {
       Reflect.set(testEnv, "MIGRATION_READ_ONLY", previous);
     }
   });
+  it("supports disabled expiry, unknown batches, audited date fill and FIFO", async () => {
+    const manager = await login("store_manager", "2233");
+    const item = await (await request("/items", "POST", manager, {name:"不追踪效期", expiry_enabled:false})).json() as {id:number; expiry_enabled:boolean};
+    expect(item.expiry_enabled).toBe(false);
+    const received = await request("/stock/receive", "POST", manager, {items:[{item_id:item.id, qty:3, expiry_date:"2000-01-01"}]});
+    expect(received.status).toBe(201);
+    const [batch] = await received.json() as Array<{id:number; expiry_date:string|null; expiry_enabled:boolean; days_to_expiry:number|null}>;
+    expect(batch).toMatchObject({expiry_date:null, expiry_enabled:false, days_to_expiry:null});
+    const purchase = await (await request("/purchases", "POST", manager, {items:[{item_id:item.id,qty:2}]})).json() as {id:number;items:Array<{id:number}>};
+    expect((await request(`/purchases/${purchase.id}/receive`, "POST", manager, {items:[{purchase_item_id:purchase.items[0].id}]})).status).toBe(200);
+    await testEnv.DB.prepare("INSERT INTO batches(item_id,qty,initial_qty,expiry_date,received_at) VALUES(?,2,2,'2000-01-01','2020-01-01')").bind(item.id).run();
+    const before = await (await request("/dashboard", "GET", manager)).json() as {expiring_soon:number};
+    const alerts = await (await request("/expiry", "GET", manager)).json() as Array<{item_id:number}>;
+    expect(alerts.some(row => row.item_id===item.id)).toBe(false);
+    const stocks = await (await request("/stock", "GET", manager)).json() as Array<{item:{id:number}; nearest_expiry:string|null; missing_expiry_count:number}>;
+    expect(stocks.find(row => row.item.id===item.id)).toMatchObject({nearest_expiry:null,missing_expiry_count:0});
+    await request(`/items/${item.id}`, "PATCH", manager, {expiry_enabled:true});
+    expect((await request(`/batches/${batch.id}/expiry`, "PATCH", manager, {expiry_date:"2099-01-01"})).status).toBe(200);
+    expect((await request(`/batches/${batch.id}/expiry`, "PATCH", manager, {expiry_date:"2099-01-02"})).status).toBe(409);
+    const audit = await testEnv.DB.prepare("SELECT * FROM batch_expiry_updates WHERE batch_id=?").bind(batch.id).first();
+    expect(audit).toMatchObject({old_expiry_date:null,new_expiry_date:"2099-01-01"});
+    const after = await (await request("/dashboard", "GET", manager)).json() as {expiring_soon:number};
+    expect(after.expiring_soon).toBe(before.expiring_soon+1);
+    expect((await request("/stock/receive", "POST", manager, {items:[{item_id:item.id,qty:1}]})).status).toBe(400);
+    expect((await request("/stock/receive", "POST", manager, {items:[{item_id:item.id,qty:1,expiry_date:"2026-02-31"}]})).status).toBe(400);
+  });
+
 });

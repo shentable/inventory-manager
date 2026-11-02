@@ -70,7 +70,7 @@ fn snapshot(db: &Connection, as_of: &str, today: NaiveDate) -> Result<Value, Api
     .collect::<Result<Vec<_>, _>>()?;
     let mut expired = Vec::new();
     let mut upcoming = Vec::new();
-    let mut statement = db.prepare("SELECT b.id,b.item_id,i.name,i.unit,b.qty,b.expiry_date FROM batches b JOIN items i ON i.id=b.item_id WHERE b.qty>0 AND b.expiry_date<=?1 ORDER BY b.expiry_date,b.id")?;
+    let mut statement = db.prepare("SELECT b.id,b.item_id,i.name,i.unit,b.qty,b.expiry_date FROM batches b JOIN items i ON i.id=b.item_id WHERE i.expiry_enabled=1 AND b.qty>0 AND b.expiry_date<=?1 ORDER BY b.expiry_date,b.id")?;
     let rows = statement.query_map([cutoff], |r| {
         let expiry: String = r.get(5)?;
         let days = NaiveDate::parse_from_str(&expiry, "%Y-%m-%d").map(|d| (d-today).num_days()).unwrap_or(0);

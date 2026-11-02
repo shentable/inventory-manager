@@ -2,7 +2,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use std::path::Path;
 use uuid::Uuid;
 
-pub const DB_SCHEMA: &str = "20261102_11";
+pub const DB_SCHEMA: &str = "20261102_12";
 
 pub fn open(path: &Path) -> rusqlite::Result<Connection> {
     if let Some(parent) = path.parent() {
@@ -135,6 +135,124 @@ fn migrate_legacy_user_roles(conn: &Connection) -> rusqlite::Result<()> {
     result.and(restored_alter).and(restored_fk)
 }
 
+// Rebuild only the nullable date contract; copy every original column and restore
+// indexes, triggers, sequence and FK settings. Never drop referenced business rows.
+fn nullable_dates(conn: &Connection, table: &str, names: &[&str]) -> rusqlite::Result<()> {
+    let sql: String = conn.query_row(
+        "SELECT sql FROM sqlite_schema WHERE type='table' AND name=?1",
+        [table],
+        |r| r.get(0),
+    )?;
+    let mut widened = sql.clone();
+    let mut changed = false;
+    for name in names {
+        let required: bool = conn
+            .prepare(&format!("PRAGMA table_info({table})"))?
+            .query_map([], |r| Ok((r.get::<_, String>(1)?, r.get::<_, bool>(3)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+            .iter()
+            .any(|(n, v)| n == name && *v);
+        if !required {
+            continue;
+        }
+        // Known schemas use one column declaration per comma; date declarations
+        // contain no comma. Fail closed if the expected NOT NULL is absent.
+        let lower = widened.to_ascii_lowercase();
+        let start = lower.find(name).ok_or(rusqlite::Error::InvalidQuery)?;
+        let end = lower[start..]
+            .find(',')
+            .map(|v| start + v)
+            .unwrap_or(lower.len());
+        let fragment = &lower[start..end];
+        let offset = fragment.find("not").ok_or(rusqlite::Error::InvalidQuery)?;
+        let tail = &fragment[offset + 3..];
+        let spaces = tail.len() - tail.trim_start().len();
+        if spaces == 0 || !tail.trim_start().starts_with("null") {
+            return Err(rusqlite::Error::InvalidQuery);
+        }
+        widened.replace_range(start + offset..start + offset + 3 + spaces + 4, "");
+        changed = true;
+    }
+    if !changed {
+        return Ok(());
+    }
+    let definition = &widened[widened.find('(').ok_or(rusqlite::Error::InvalidQuery)?..];
+    // SQLite's documented table-rebuild procedure requires FK enforcement off
+    // before BEGIN; never silently disable checks inside a caller's transaction.
+    if !conn.is_autocommit() {
+        return Err(rusqlite::Error::InvalidQuery);
+    }
+    let foreign_keys: bool = conn.pragma_query_value(None, "foreign_keys", |r| r.get(0))?;
+    let legacy_alter_table: bool =
+        conn.pragma_query_value(None, "legacy_alter_table", |r| r.get(0))?;
+    conn.pragma_update(None, "foreign_keys", false)?;
+    let result = (|| -> rusqlite::Result<()> {
+        // Views and triggers on other tables may refer to {table}. While the old
+        // table is dropped, disable ALTER's schema rewrite/validation; those
+        // references retain their original target name throughout the rebuild.
+        conn.pragma_update(None, "legacy_alter_table", true)?;
+        let tx = conn.unchecked_transaction()?;
+        let objects = {
+            let mut stmt = tx.prepare(
+                &format!("SELECT sql FROM sqlite_schema WHERE tbl_name='{table}' AND type IN ('index','trigger') AND sql IS NOT NULL ORDER BY type,name"),
+            )?;
+            stmt.query_map([], |r| r.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        let columns = {
+            let mut stmt = tx.prepare(&format!("PRAGMA table_info({table})"))?;
+            stmt.query_map([], |r| r.get::<_, String>(1))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+                .into_iter()
+                .map(|name| format!("\"{}\"", name.replace('"', "\"\"")))
+                .collect::<Vec<_>>()
+                .join(",")
+        };
+        let autoincrement = sql.to_ascii_lowercase().contains("autoincrement");
+        let sequence = if autoincrement {
+            tx.query_row(
+                &format!("SELECT seq FROM sqlite_sequence WHERE name='{table}'"),
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .optional()?
+        } else {
+            None
+        };
+        tx.execute_batch(&format!(
+            "CREATE TABLE __expiry_nullable_migration {definition};\
+             INSERT INTO __expiry_nullable_migration ({columns}) SELECT {columns} FROM {table};\
+             DROP TABLE {table};\
+             ALTER TABLE __expiry_nullable_migration RENAME TO {table};"
+        ))?;
+        for object in objects {
+            tx.execute_batch(&object)?;
+        }
+        if autoincrement {
+            tx.execute(
+                &format!("DELETE FROM sqlite_sequence WHERE name='{table}'"),
+                [],
+            )?;
+            if let Some(sequence) = sequence {
+                tx.execute(
+                    &format!("INSERT INTO sqlite_sequence(name,seq) VALUES('{table}',?1)"),
+                    [sequence],
+                )?;
+            }
+        }
+        // A failed check rolls the complete rebuild back, including indexes,
+        // triggers and sqlite_sequence. Existing references never get renamed.
+        if tx.prepare("PRAGMA foreign_key_check")?.exists([])? {
+            return Err(rusqlite::Error::InvalidQuery);
+        }
+        tx.commit()
+    })();
+    // Restore the caller's enforcement setting on both success and failure.
+    let restored_alter = conn.pragma_update(None, "legacy_alter_table", legacy_alter_table);
+    let restored_fk = conn.pragma_update(None, "foreign_keys", foreign_keys);
+    result.and(restored_alter).and(restored_fk)
+}
+
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     let existing_version: Option<String> = conn
         .query_row("SELECT version_num FROM alembic_version LIMIT 1", [], |r| {
@@ -161,6 +279,8 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             && v != "20260908_09"
             && v != "20260908_10"
             && v != "20261102_d1_06"
+            && v != "20261102_d1_07"
+            && v != "20261102_11"
             && v != DB_SCHEMA
     }) {
         return Err(rusqlite::Error::InvalidQuery); // 不得静默降级未知的新 schema
@@ -256,13 +376,20 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             |r| r.get(0),
         )
         .optional()?;
+    conn.execute_batch(include_str!("../migrations/20260908_10.sql"))?;
+    nullable_dates(conn, "batches", &["expiry_date"])?;
+    nullable_dates(
+        conn,
+        "stock_receipt_corrections",
+        &["old_expiry_date", "new_expiry_date"],
+    )?;
     conn.execute_batch("SAVEPOINT quantity_migration")?;
     if !matches!(
         existing_version.as_deref(),
-        Some("20260908_09" | "20260908_10" | "20261102_11")
+        Some("20260908_09" | "20260908_10" | "20261102_11" | "20261102_12")
     ) && !matches!(
         recorded_schema.as_deref(),
-        Some("20260908_09" | "20260908_10" | "20261102_11")
+        Some("20260908_09" | "20260908_10" | "20261102_11" | "20261102_12")
     ) {
         if let Err(err) = conn.execute_batch(include_str!("../migrations/20260908_09.sql")) {
             conn.execute_batch("ROLLBACK TO quantity_migration; RELEASE quantity_migration")?;
@@ -273,6 +400,10 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     if !has_column(conn, "items", "daily_quantity_required")? {
         conn.execute_batch(include_str!("../migrations/20261102_11.sql"))?;
     }
+    if !has_column(conn, "items", "expiry_enabled")? {
+        conn.execute_batch("ALTER TABLE items ADD COLUMN expiry_enabled BOOLEAN NOT NULL DEFAULT 1 CHECK (expiry_enabled IN (0,1))")?;
+    }
+    conn.execute_batch(include_str!("../migrations/20261102_12.sql"))?;
     let store_id: Option<String> = conn
         .query_row("SELECT store_id FROM store_meta WHERE id=1", [], |row| {
             row.get(0)
@@ -697,6 +828,60 @@ mod tests {
                 .get::<_, Option<i64>>(0))
                 .unwrap()
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn nullable_dates_preserve_references_objects_and_sequence() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;
+        CREATE TABLE users(id INTEGER PRIMARY KEY);
+        INSERT INTO users VALUES(1);
+        CREATE TABLE batches(id INTEGER PRIMARY KEY AUTOINCREMENT, expiry_date DATE NOT   NULL, qty INTEGER NOT NULL);
+        INSERT INTO batches(id,expiry_date,qty) VALUES(5,'2030-01-01',23);
+        CREATE TABLE child(batch_id INTEGER REFERENCES batches(id)); INSERT INTO child VALUES(5);
+        CREATE TABLE audit(value INTEGER);
+        CREATE INDEX batch_date_idx ON batches(expiry_date);
+        CREATE TRIGGER batch_qty_audit AFTER UPDATE OF qty ON batches BEGIN INSERT INTO audit VALUES(NEW.qty); END;
+        CREATE VIEW batch_view AS SELECT * FROM batches;
+        UPDATE sqlite_sequence SET seq=99 WHERE name='batches';").unwrap();
+        nullable_dates(&conn, "batches", &["expiry_date"]).unwrap();
+        nullable_dates(&conn, "batches", &["expiry_date"]).unwrap();
+        assert_eq!(
+            conn.query_row("SELECT qty FROM batch_view WHERE id=5", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            23
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT seq FROM sqlite_sequence WHERE name='batches'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            99
+        );
+        assert!(
+            !conn
+                .prepare("PRAGMA foreign_key_check")
+                .unwrap()
+                .exists([])
+                .unwrap()
+        );
+        conn.execute("INSERT INTO batches(expiry_date,qty) VALUES(NULL,10)", [])
+            .unwrap();
+        assert_eq!(conn.last_insert_rowid(), 100);
+        conn.execute("UPDATE batches SET qty=24 WHERE id=5", [])
+            .unwrap();
+        assert_eq!(
+            conn.query_row("SELECT value FROM audit", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            24
+        );
+        assert!(
+            conn.query_row("PRAGMA foreign_keys", [], |r| r.get::<_, bool>(0))
+                .unwrap()
         );
     }
 

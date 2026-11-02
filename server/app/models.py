@@ -54,6 +54,7 @@ class Item(Base):
     name: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     category: Mapped[str] = mapped_column(String(64), default="")
     unit: Mapped[str] = mapped_column(String(16), default="个")
+    expiry_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")
     shelf_life_days: Mapped[int] = mapped_column(Integer, default=7)
     min_stock: Mapped[float] = mapped_column(QuantityColumn, default=0)
     daily_count_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -71,7 +72,7 @@ class Batch(Base):
     item_id: Mapped[int] = mapped_column(ForeignKey("items.id"), index=True)
     qty: Mapped[float] = mapped_column(QuantityColumn, default=0)          # 剩余数量
     initial_qty: Mapped[float] = mapped_column(QuantityColumn, default=0)  # 初始数量
-    expiry_date: Mapped[str] = mapped_column(String(10))          # YYYY-MM-DD
+    expiry_date: Mapped[str | None] = mapped_column(String(10), nullable=True)          # YYYY-MM-DD
     received_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     source: Mapped[str] = mapped_column(String(16), default="init")  # purchase|receive|init|adjust
     note: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -105,8 +106,8 @@ class StockReceiptCorrection(Base):
     batch_id: Mapped[int] = mapped_column(ForeignKey("batches.id"), index=True)
     old_qty: Mapped[float] = mapped_column(QuantityColumn)
     new_qty: Mapped[float] = mapped_column(QuantityColumn)
-    old_expiry_date: Mapped[str] = mapped_column(String(10))
-    new_expiry_date: Mapped[str] = mapped_column(String(10))
+    old_expiry_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    new_expiry_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
     old_note: Mapped[str | None] = mapped_column(String(255), nullable=True)
     new_note: Mapped[str | None] = mapped_column(String(255), nullable=True)
     reason: Mapped[str] = mapped_column(String(255))
@@ -230,3 +231,13 @@ class WasteRecord(Base):
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     item: Mapped["Item"] = relationship()
+
+
+class BatchExpiryUpdate(Base):
+    __tablename__ = "batch_expiry_updates"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    batch_id: Mapped[int] = mapped_column(ForeignKey("batches.id"), index=True)
+    old_expiry_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    new_expiry_date: Mapped[str] = mapped_column(String(10))
+    actor_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

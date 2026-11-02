@@ -104,6 +104,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/items", get(list_items).post(create_item))
         .route("/api/items/{id}", axum::routing::patch(update_item))
         .route("/api/items/{id}/batches", get(item_batches))
+        .route(
+            "/api/batches/{id}/expiry",
+            axum::routing::patch(fill_batch_expiry),
+        )
         .route("/api/items/{id}/movements", get(item_movements))
         .route("/api/stock", get(stock))
         .route("/api/stock/receive", post(receive_stock))
@@ -579,7 +583,7 @@ fn item_last_count(
     })
 }
 fn item_json(db: &Connection, id: i64) -> rusqlite::Result<Value> {
-    db.query_row("SELECT id,name,category,unit,shelf_life_days,min_stock,daily_count_enabled,weekly_count_enabled,active,sort_order,daily_quantity_required FROM items WHERE id=?1",[id],|r|{let last=item_last_count(db,id)?;Ok(json!({"id":r.get::<_,i64>(0)?,"name":r.get::<_,String>(1)?,"category":r.get::<_,String>(2)?,"unit":r.get::<_,String>(3)?,"shelf_life_days":r.get::<_,i64>(4)?,"min_stock":r.get::<_,Quantity>(5)?,"daily_count_enabled":r.get::<_,bool>(6)?,"weekly_count_enabled":r.get::<_,bool>(7)?,"active":r.get::<_,bool>(8)?,"sort_order":r.get::<_,i64>(9)?,"daily_quantity_required":r.get::<_,bool>(10)?,"stock":item_stock(db,id)?,"last_count_at":last.0,"last_count_qty":last.1,"last_count_type":last.2,"last_count_enough":last.3}))})
+    db.query_row("SELECT id,name,category,unit,shelf_life_days,min_stock,daily_count_enabled,weekly_count_enabled,active,sort_order,daily_quantity_required,expiry_enabled FROM items WHERE id=?1",[id],|r|{let last=item_last_count(db,id)?;Ok(json!({"id":r.get::<_,i64>(0)?,"name":r.get::<_,String>(1)?,"category":r.get::<_,String>(2)?,"unit":r.get::<_,String>(3)?,"shelf_life_days":r.get::<_,i64>(4)?,"min_stock":r.get::<_,Quantity>(5)?,"daily_count_enabled":r.get::<_,bool>(6)?,"weekly_count_enabled":r.get::<_,bool>(7)?,"active":r.get::<_,bool>(8)?,"sort_order":r.get::<_,i64>(9)?,"daily_quantity_required":r.get::<_,bool>(10)?,"expiry_enabled":r.get::<_,bool>(11)?,"stock":item_stock(db,id)?,"last_count_at":last.0,"last_count_qty":last.1,"last_count_type":last.2,"last_count_enough":last.3}))})
 }
 
 #[derive(Deserialize, Default)]
@@ -614,6 +618,7 @@ struct ItemCreate {
     category: Option<String>,
     unit: Option<String>,
     shelf_life_days: Option<i64>,
+    expiry_enabled: Option<bool>,
     min_stock: Option<Quantity>,
     daily_count_enabled: Option<bool>,
     daily_quantity_required: Option<bool>,
@@ -642,7 +647,7 @@ async fn create_item(
     {
         return Err(ApiError::conflict("库存品名称已存在"));
     }
-    db.execute("INSERT INTO items(name,category,unit,shelf_life_days,min_stock,daily_count_enabled,weekly_count_enabled,active,sort_order,created_at,daily_quantity_required) VALUES(?1,?2,?3,?4,?5,?6,?7,1,?8,?9,?10)",params![p.name,p.category.unwrap_or_default(),p.unit.unwrap_or_else(||"个".into()),p.shelf_life_days.unwrap_or(7),p.min_stock.unwrap_or_default(),p.daily_count_enabled.unwrap_or(true),p.weekly_count_enabled.unwrap_or(true),p.sort_order.unwrap_or(0),now(),p.daily_quantity_required.unwrap_or(false)])?;
+    db.execute("INSERT INTO items(name,category,unit,shelf_life_days,min_stock,daily_count_enabled,weekly_count_enabled,active,sort_order,created_at,daily_quantity_required,expiry_enabled) VALUES(?1,?2,?3,?4,?5,?6,?7,1,?8,?9,?10,?11)",params![p.name,p.category.unwrap_or_default(),p.unit.unwrap_or_else(||"个".into()),p.shelf_life_days.unwrap_or(7),p.min_stock.unwrap_or_default(),p.daily_count_enabled.unwrap_or(true),p.weekly_count_enabled.unwrap_or(true),p.sort_order.unwrap_or(0),now(),p.daily_quantity_required.unwrap_or(false),p.expiry_enabled.unwrap_or(true)])?;
     let id = db.last_insert_rowid();
     Ok((StatusCode::CREATED, Json(item_json(&db, id)?)))
 }
@@ -652,6 +657,7 @@ struct ItemUpdate {
     category: Option<String>,
     unit: Option<String>,
     shelf_life_days: Option<i64>,
+    expiry_enabled: Option<bool>,
     min_stock: Option<Quantity>,
     daily_count_enabled: Option<bool>,
     daily_quantity_required: Option<bool>,
@@ -689,10 +695,64 @@ async fn update_item(
             return Err(ApiError::conflict("库存品名称已存在"));
         }
     }
-    db.execute("UPDATE items SET name=coalesce(?1,name),category=coalesce(?2,category),unit=coalesce(?3,unit),shelf_life_days=coalesce(?4,shelf_life_days),min_stock=coalesce(?5,min_stock),daily_count_enabled=coalesce(?6,daily_count_enabled),weekly_count_enabled=coalesce(?7,weekly_count_enabled),active=coalesce(?8,active),sort_order=coalesce(?9,sort_order),daily_quantity_required=coalesce(?10,daily_quantity_required) WHERE id=?11",params![p.name,p.category,p.unit,p.shelf_life_days,p.min_stock,p.daily_count_enabled,p.weekly_count_enabled,p.active,p.sort_order,p.daily_quantity_required,id])?;
+    db.execute("UPDATE items SET name=coalesce(?1,name),category=coalesce(?2,category),unit=coalesce(?3,unit),shelf_life_days=coalesce(?4,shelf_life_days),min_stock=coalesce(?5,min_stock),daily_count_enabled=coalesce(?6,daily_count_enabled),weekly_count_enabled=coalesce(?7,weekly_count_enabled),active=coalesce(?8,active),sort_order=coalesce(?9,sort_order),daily_quantity_required=coalesce(?10,daily_quantity_required),expiry_enabled=coalesce(?11,expiry_enabled) WHERE id=?12",params![p.name,p.category,p.unit,p.shelf_life_days,p.min_stock,p.daily_count_enabled,p.weekly_count_enabled,p.active,p.sort_order,p.daily_quantity_required,p.expiry_enabled,id])?;
     Ok(Json(item_json(&db, id)?))
 }
 
+fn expiry_enabled(db: &Connection, item: i64) -> rusqlite::Result<bool> {
+    db.query_row(
+        "SELECT expiry_enabled FROM items WHERE id=?1",
+        [item],
+        |r| r.get(0),
+    )
+}
+fn expiry_days(date: Option<&str>, today: NaiveDate) -> Option<i64> {
+    date.and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+        .map(|d| (d - today).num_days())
+}
+fn validate_expiry(db: &Connection, item: i64, date: Option<&str>) -> Result<(), ApiError> {
+    if expiry_enabled(db, item)?
+        && !date.is_some_and(|d| d.len() == 10 && NaiveDate::parse_from_str(d, "%Y-%m-%d").is_ok())
+    {
+        return Err(ApiError::bad("效期必须为有效日期 YYYY-MM-DD"));
+    }
+    Ok(())
+}
+#[derive(Deserialize)]
+struct FillExpiryIn {
+    expiry_date: String,
+}
+async fn fill_batch_expiry(
+    State(s): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+    Json(p): Json<FillExpiryIn>,
+) -> Result<Json<Value>, ApiError> {
+    let mut db = s.db.lock().unwrap();
+    let u = current_user(&db, &s.secret, &headers, Some("manager"), false)?;
+    let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let item = tx
+        .query_row(
+            "SELECT item_id FROM batches WHERE id=?1 AND qty>0 AND expiry_date IS NULL",
+            [id],
+            |r| r.get::<_, i64>(0),
+        )
+        .optional()?
+        .ok_or_else(|| ApiError::conflict("仅可为有库存且缺少效期的批次补填"))?;
+    if !expiry_enabled(&tx, item)? {
+        return Err(ApiError::bad("请先启用效期"));
+    }
+    validate_expiry(&tx, item, Some(&p.expiry_date))?;
+    tx.execute(
+        "UPDATE batches SET expiry_date=?1 WHERE id=?2",
+        params![p.expiry_date, id],
+    )?;
+    tx.execute("INSERT INTO batch_expiry_updates(batch_id,old_expiry_date,new_expiry_date,actor_id,created_at) VALUES(?1,NULL,?2,?3,?4)",params![id,p.expiry_date,u.id,now()])?;
+    tx.commit()?;
+    Ok(Json(
+        json!({"id":id,"item_id":item,"expiry_date":p.expiry_date}),
+    ))
+}
 async fn item_batches(
     State(s): State<AppState>,
     Path(id): Path<i64>,
@@ -705,7 +765,7 @@ async fn item_batches(
     }
     let today = store_today();
     let mut st=db.prepare("SELECT id,item_id,qty,initial_qty,expiry_date,received_at,source,note FROM batches WHERE item_id=?1 ORDER BY expiry_date,id")?;
-    let rows=st.query_map([id],|r|{let expiry:String=r.get(4)?;let days=NaiveDate::parse_from_str(&expiry,"%Y-%m-%d").map(|d|(d-today).num_days()).unwrap_or(0);Ok(json!({"id":r.get::<_,i64>(0)?,"item_id":r.get::<_,i64>(1)?,"qty":r.get::<_,Quantity>(2)?,"initial_qty":r.get::<_,Quantity>(3)?,"expiry_date":expiry,"received_at":out_dt(r.get(5)?),"source":r.get::<_,String>(6)?,"note":r.get::<_,Option<String>>(7)?,"days_to_expiry":days}))})?.collect::<Result<Vec<_>,_>>()?;
+    let rows=st.query_map([id],|r|{let expiry:Option<String>=r.get(4)?;let enabled=expiry_enabled(&db,id)?;let days=if enabled {expiry_days(expiry.as_deref(),today)} else {None};Ok(json!({"id":r.get::<_,i64>(0)?,"item_id":r.get::<_,i64>(1)?,"qty":r.get::<_,Quantity>(2)?,"initial_qty":r.get::<_,Quantity>(3)?,"expiry_date":expiry,"received_at":out_dt(r.get(5)?),"source":r.get::<_,String>(6)?,"note":r.get::<_,Option<String>>(7)?,"days_to_expiry":days,"expiry_enabled":enabled}))})?.collect::<Result<Vec<_>,_>>()?;
     Ok(Json(Value::Array(rows)))
 }
 async fn item_movements(
@@ -726,15 +786,15 @@ async fn item_movements(
 async fn stock(State(s): State<AppState>, headers: HeaderMap) -> Result<Json<Value>, ApiError> {
     let db = read_db(&s)?;
     current_user(&db, &s.secret, &headers, Some("staff"), false)?;
-    let mut st=db.prepare("SELECT id,name,category,unit,shelf_life_days,min_stock,daily_count_enabled,weekly_count_enabled,active,daily_quantity_required FROM items WHERE active=1 ORDER BY sort_order,id")?;
-    let rows=st.query_map([],|r|{let id:i64=r.get(0)?;let (qty,nearest,count):(Quantity,Option<String>,i64)=db.query_row("SELECT coalesce(sum(qty),0),min(CASE WHEN qty>0 THEN expiry_date END),coalesce(sum(CASE WHEN qty>0 THEN 1 ELSE 0 END),0) FROM batches WHERE item_id=?1",[id],|x|Ok((x.get(0)?,x.get(1)?,x.get(2)?)))?;Ok(json!({"item":{"id":id,"name":r.get::<_,String>(1)?,"category":r.get::<_,String>(2)?,"unit":r.get::<_,String>(3)?,"shelf_life_days":r.get::<_,i64>(4)?,"min_stock":r.get::<_,Quantity>(5)?,"daily_count_enabled":r.get::<_,bool>(6)?,"weekly_count_enabled":r.get::<_,bool>(7)?,"active":r.get::<_,bool>(8)?,"daily_quantity_required":r.get::<_,bool>(9)?},"stock":qty,"nearest_expiry":nearest,"batch_count":count}))})?.collect::<Result<Vec<_>,_>>()?;
+    let mut st=db.prepare("SELECT id,name,category,unit,shelf_life_days,min_stock,daily_count_enabled,weekly_count_enabled,active,daily_quantity_required,expiry_enabled FROM items WHERE active=1 ORDER BY sort_order,id")?;
+    let rows=st.query_map([],|r|{let id:i64=r.get(0)?;let (qty,nearest,count):(Quantity,Option<String>,i64)=db.query_row("SELECT coalesce(sum(qty),0),min(CASE WHEN qty>0 THEN expiry_date END),coalesce(sum(CASE WHEN qty>0 THEN 1 ELSE 0 END),0) FROM batches WHERE item_id=?1",[id],|x|Ok((x.get(0)?,x.get(1)?,x.get(2)?)))?;Ok(json!({"item":{"id":id,"name":r.get::<_,String>(1)?,"category":r.get::<_,String>(2)?,"unit":r.get::<_,String>(3)?,"shelf_life_days":r.get::<_,i64>(4)?,"min_stock":r.get::<_,Quantity>(5)?,"daily_count_enabled":r.get::<_,bool>(6)?,"weekly_count_enabled":r.get::<_,bool>(7)?,"active":r.get::<_,bool>(8)?,"daily_quantity_required":r.get::<_,bool>(9)?,"expiry_enabled":r.get::<_,bool>(10)?},"stock":qty,"latest_received_at":db.query_row("SELECT max(received_at) FROM batches WHERE item_id=?1 AND qty>0",[id],|r|r.get::<_,Option<String>>(0))?.map(out_dt),"nearest_expiry":if r.get::<_,bool>(10)? {nearest} else {None},"batch_count":count,"missing_expiry_count":if r.get::<_,bool>(10)? {db.query_row("SELECT count(*) FROM batches WHERE item_id=?1 AND qty>0 AND expiry_date IS NULL",[id],|r|r.get::<_,i64>(0))?} else {0}}))})?.collect::<Result<Vec<_>,_>>()?;
     Ok(Json(Value::Array(rows)))
 }
 #[derive(Deserialize)]
 struct StockReceiveLine {
     item_id: i64,
     qty: Quantity,
-    expiry_date: String,
+    expiry_date: Option<String>,
 }
 #[derive(Deserialize)]
 struct StockReceiveIn {
@@ -768,9 +828,7 @@ async fn receive_stock(
         if !item_exists(&db, line.item_id)? {
             return Err(ApiError::bad(&format!("库存品不存在：{}", line.item_id)));
         }
-        if NaiveDate::parse_from_str(&line.expiry_date, "%Y-%m-%d").is_err() {
-            return Err(ApiError::bad("效期必须为有效日期 YYYY-MM-DD"));
-        }
+        validate_expiry(&db, line.item_id, line.expiry_date.as_deref())?;
     }
 
     let received_at = now();
@@ -780,7 +838,7 @@ async fn receive_stock(
     for line in p.items {
         tx.execute(
             "INSERT INTO batches(item_id,qty,initial_qty,expiry_date,received_at,source,note) VALUES(?1,?2,?2,?3,?4,'receive',?5)",
-            params![line.item_id, line.qty, line.expiry_date, received_at, note],
+            params![line.item_id, line.qty, if expiry_enabled(&tx,line.item_id)? {line.expiry_date} else {None}, received_at, note],
         )?;
         let batch_id = tx.last_insert_rowid();
         movement(
@@ -804,10 +862,9 @@ async fn receive_stock(
             "SELECT id,item_id,qty,initial_qty,expiry_date,received_at,source,note FROM batches WHERE id=?1",
             [id],
             |r| {
-                let expiry: String = r.get(4)?;
-                let days = NaiveDate::parse_from_str(&expiry, "%Y-%m-%d")
-                    .map(|date| (date - today).num_days())
-                    .unwrap_or(0);
+                let expiry: Option<String> = r.get(4)?;
+                let enabled=expiry_enabled(&db,r.get(1)?)?;
+                let days=if enabled {expiry_days(expiry.as_deref(),today)} else {None};
                 Ok(json!({
                     "id": r.get::<_, i64>(0)?,
                     "item_id": r.get::<_, i64>(1)?,
@@ -818,6 +875,7 @@ async fn receive_stock(
                     "source": r.get::<_, String>(6)?,
                     "note": r.get::<_, Option<String>>(7)?,
                     "days_to_expiry": days,
+                    "expiry_enabled":enabled,
                 }))
             },
         )?;
@@ -889,7 +947,7 @@ async fn receipt(
 #[derive(Deserialize)]
 struct ReceiptCorrectionIn {
     qty: Quantity,
-    expiry_date: String,
+    expiry_date: Option<String>,
     note: Option<String>,
     reason: String,
     expected_revision: i64,
@@ -905,8 +963,6 @@ async fn correct_receipt(
     if p.reason.chars().count() > 255
         || p.note.as_ref().is_some_and(|v| v.chars().count() > 255)
         || p.expected_revision < 0
-        || p.expiry_date.len() != 10
-        || NaiveDate::parse_from_str(&p.expiry_date, "%Y-%m-%d").is_err()
     {
         return Err(ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -938,16 +994,22 @@ async fn correct_receipt(
     }
     let note = p.note.as_deref().map(str::trim).filter(|v| !v.is_empty());
     let old_note = row["note"].as_str();
-    let old_expiry = row["expiry_date"].as_str().unwrap();
-    if delta == 0 && p.expiry_date == old_expiry && note == old_note {
+    let old_expiry = row["expiry_date"].as_str();
+    let new_expiry = if expiry_enabled(&tx, row["item_id"].as_i64().unwrap())? {
+        p.expiry_date.as_deref().or(old_expiry)
+    } else {
+        old_expiry
+    };
+    validate_expiry(&tx, row["item_id"].as_i64().unwrap(), new_expiry)?;
+    if delta == 0 && new_expiry == old_expiry && note == old_note {
         return Err(ApiError::bad("没有需要保存的更正"));
     }
     tx.execute("INSERT INTO stock_receipt_corrections(batch_id,old_qty,new_qty,old_expiry_date,new_expiry_date,old_note,new_note,reason,actor_id,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
-        params![id,old_qty,p.qty,old_expiry,p.expiry_date,old_note,note,reason,u.id,now()])?;
+        params![id,old_qty,p.qty,old_expiry,new_expiry,old_note,note,reason,u.id,now()])?;
     let correction_id = tx.last_insert_rowid();
     tx.execute(
         "UPDATE batches SET qty=?1,expiry_date=?2,note=?3 WHERE id=?4",
-        params![remaining, p.expiry_date, note, id],
+        params![remaining, new_expiry, note, id],
     )?;
     movement(
         &tx,
@@ -982,7 +1044,7 @@ async fn expiry(
     let cutoff = (today + Duration::days(days))
         .format("%Y-%m-%d")
         .to_string();
-    let mut st=db.prepare("SELECT b.id,b.item_id,i.name,i.unit,b.qty,b.expiry_date FROM batches b JOIN items i ON i.id=b.item_id WHERE b.qty>0 AND b.expiry_date<=?1 ORDER BY b.expiry_date,b.id")?;
+    let mut st=db.prepare("SELECT b.id,b.item_id,i.name,i.unit,b.qty,b.expiry_date FROM batches b JOIN items i ON i.id=b.item_id WHERE i.expiry_enabled=1 AND b.qty>0 AND b.expiry_date<=?1 ORDER BY b.expiry_date,b.id")?;
     let rows=st.query_map([cutoff],|r|{let e:String=r.get(5)?;let d=NaiveDate::parse_from_str(&e,"%Y-%m-%d").map(|x|(x-today).num_days()).unwrap_or(0);Ok(json!({"batch_id":r.get::<_,i64>(0)?,"item_id":r.get::<_,i64>(1)?,"item_name":r.get::<_,String>(2)?,"unit":r.get::<_,String>(3)?,"qty":r.get::<_,Quantity>(4)?,"expiry_date":e,"days_to_expiry":d}))})?.collect::<Result<Vec<_>,_>>()?;
     Ok(Json(Value::Array(rows)))
 }
@@ -1056,7 +1118,7 @@ async fn dashboard(State(s): State<AppState>, headers: HeaderMap) -> Result<Json
         .format("%Y-%m-%d")
         .to_string();
     let exp: i64 = db.query_row(
-        "SELECT count(*) FROM batches WHERE qty>0 AND expiry_date<=?1",
+        "SELECT count(*) FROM batches b JOIN items i ON i.id=b.item_id WHERE i.expiry_enabled=1 AND b.qty>0 AND b.expiry_date<=?1",
         [cutoff],
         |r| r.get(0),
     )?;
@@ -1088,8 +1150,8 @@ async fn dashboard(State(s): State<AppState>, headers: HeaderMap) -> Result<Json
 
 fn purchase_json(db: &Connection, id: i64) -> rusqlite::Result<Value> {
     let (status,note,created_by,creator,created_at,received_at):(String,Option<String>,i64,String,String,Option<String>)=db.query_row("SELECT p.status,p.note,p.created_by,coalesce(u.display_name,''),p.created_at,p.received_at FROM purchases p LEFT JOIN users u ON u.id=p.created_by WHERE p.id=?1",[id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?)))?;
-    let mut st=db.prepare("SELECT pi.id,pi.item_id,coalesce(i.name,'?'),coalesce(i.unit,''),pi.qty FROM purchase_items pi LEFT JOIN items i ON i.id=pi.item_id WHERE pi.purchase_id=?1 ORDER BY pi.id")?;
-    let items=st.query_map([id],|r|Ok(json!({"id":r.get::<_,i64>(0)?,"item_id":r.get::<_,i64>(1)?,"item_name":r.get::<_,String>(2)?,"unit":r.get::<_,String>(3)?,"qty":r.get::<_,Quantity>(4)?})))?.collect::<Result<Vec<_>,_>>()?;
+    let mut st=db.prepare("SELECT pi.id,pi.item_id,coalesce(i.name,'?'),coalesce(i.unit,''),pi.qty,i.expiry_enabled,i.shelf_life_days FROM purchase_items pi LEFT JOIN items i ON i.id=pi.item_id WHERE pi.purchase_id=?1 ORDER BY pi.id")?;
+    let items=st.query_map([id],|r|Ok(json!({"id":r.get::<_,i64>(0)?,"item_id":r.get::<_,i64>(1)?,"item_name":r.get::<_,String>(2)?,"unit":r.get::<_,String>(3)?,"qty":r.get::<_,Quantity>(4)?,"expiry_enabled":r.get::<_,bool>(5)?,"shelf_life_days":r.get::<_,i64>(6)?})))?.collect::<Result<Vec<_>,_>>()?;
     Ok(
         json!({"id":id,"status":status,"note":note,"created_by":created_by,"created_by_name":creator,"created_at":out_dt(created_at),"received_at":received_at.map(out_dt),"items":items}),
     )
@@ -1168,7 +1230,7 @@ async fn list_purchases(
 #[derive(Deserialize)]
 struct ReceiveLine {
     purchase_item_id: i64,
-    expiry_date: String,
+    expiry_date: Option<String>,
 }
 #[derive(Deserialize)]
 struct ReceiveIn {
@@ -1204,7 +1266,7 @@ async fn receive_purchase(
         })?
         .collect::<Result<Vec<_>, _>>()?;
     drop(st);
-    let provided: HashMap<i64, String> = p
+    let provided: HashMap<i64, Option<String>> = p
         .items
         .into_iter()
         .map(|x| (x.purchase_item_id, x.expiry_date))
@@ -1212,16 +1274,13 @@ async fn receive_purchase(
     if provided.len() != own.len() || own.iter().any(|x| !provided.contains_key(&x.0)) {
         return Err(ApiError::bad("入库行必须覆盖采购单全部条目"));
     }
-    if provided
-        .values()
-        .any(|v| NaiveDate::parse_from_str(v, "%Y-%m-%d").is_err())
-    {
-        return Err(ApiError::bad("效期必须为有效日期 YYYY-MM-DD"));
+    for (line, item, _) in &own {
+        validate_expiry(&db, *item, provided[line].as_deref())?;
     }
     let tx = db.transaction()?;
     if tx.execute("UPDATE purchases SET status='received',received_at=?1,handled_by=?2,handled_at=?1 WHERE id=?3 AND status='ordered'",params![now(),u.id,id])?!=1{return Err(ApiError::conflict("该采购单已处理"));}
     for (line, item, qty) in own {
-        tx.execute("INSERT INTO batches(item_id,qty,initial_qty,expiry_date,received_at,source,note) VALUES(?1,?2,?2,?3,?4,'purchase',?5)",params![item,qty,provided[&line],now(),format!("采购单 #{id}")])?;
+        tx.execute("INSERT INTO batches(item_id,qty,initial_qty,expiry_date,received_at,source,note) VALUES(?1,?2,?2,?3,?4,'purchase',?5)",params![item,qty,if expiry_enabled(&tx,item)? {provided[&line].clone()} else {None},now(),format!("采购单 #{id}")])?;
         let batch = tx.last_insert_rowid();
         movement(
             &tx,
@@ -1311,7 +1370,7 @@ fn deduct_fefo(
         return Ok(());
     }
     let mut st = db
-        .prepare("SELECT id,qty FROM batches WHERE item_id=?1 AND qty>0 ORDER BY expiry_date,id")?;
+        .prepare("SELECT b.id,b.qty FROM batches b JOIN items i ON i.id=b.item_id WHERE b.item_id=?1 AND b.qty>0 ORDER BY CASE WHEN i.expiry_enabled=0 OR b.expiry_date IS NULL THEN 0 ELSE 1 END,CASE WHEN i.expiry_enabled=1 THEN b.expiry_date END,b.received_at,b.id")?;
     let batches = st
         .query_map([item], |r| {
             Ok((r.get::<_, i64>(0)?, r.get::<_, Quantity>(1)?))
@@ -2221,9 +2280,15 @@ async fn confirm_count_pair(
                     [row.item_id],
                     |r| r.get(0),
                 )?;
-                let expiry = (store_today() + Duration::days(life))
-                    .format("%Y-%m-%d")
-                    .to_string();
+                let expiry = if expiry_enabled(&tx, row.item_id)? {
+                    Some(
+                        (store_today() + Duration::days(life))
+                            .format("%Y-%m-%d")
+                            .to_string(),
+                    )
+                } else {
+                    None
+                };
                 tx.execute("INSERT INTO batches(item_id,qty,initial_qty,expiry_date,received_at,source,note) VALUES(?1,?2,?2,?3,?4,'adjust','双人盘点盘盈')",params![row.item_id,diff,expiry,now()])?;
                 let batch = tx.last_insert_rowid();
                 movement(
@@ -2428,9 +2493,15 @@ async fn verify_count(
                     Some(id),
                 )?;
             } else if diff > 0 {
-                let expiry = (store_today() + Duration::days(life))
-                    .format("%Y-%m-%d")
-                    .to_string();
+                let expiry = if expiry_enabled(&tx, item)? {
+                    Some(
+                        (store_today() + Duration::days(life))
+                            .format("%Y-%m-%d")
+                            .to_string(),
+                    )
+                } else {
+                    None
+                };
                 tx.execute("INSERT INTO batches(item_id,qty,initial_qty,expiry_date,received_at,source,note) VALUES(?1,?2,?2,?3,?4,'adjust','盘盈')",params![item,diff,expiry,now()])?;
                 let batch = tx.last_insert_rowid();
                 movement(
@@ -2508,6 +2579,39 @@ mod tests {
         assert_eq!(row["status"], "reorder");
         assert!(row["forecast_issue"].is_null());
         assert_eq!(item_stock(&conn, 1).unwrap(), 45);
+    }
+
+    #[test]
+    fn expiry_policy_uses_fifo_or_unknown_first_then_fefo() {
+        for (enabled, expected) in [(false, 1), (true, 3)] {
+            let mut conn = Connection::open_in_memory().unwrap();
+            crate::db::migrate(&conn).unwrap();
+            conn.execute_batch("INSERT INTO users(id,username,display_name,pin_hash,role) VALUES(1,'m','m','x','manager'); INSERT INTO items(id,name) VALUES(1,'Material');
+            INSERT INTO batches(id,item_id,qty,initial_qty,expiry_date,received_at) VALUES
+            (1,1,10,10,'2035-01-01','2026-01-01'),(2,1,10,10,'2030-01-01','2026-01-02'),(3,1,10,10,NULL,'2026-01-03');").unwrap();
+            conn.execute("UPDATE items SET expiry_enabled=?1", [enabled])
+                .unwrap();
+            let tx = conn.transaction().unwrap();
+            deduct_fefo(&tx, 1, Quantity(10), None, 1, "test", "test", None).unwrap();
+            tx.commit().unwrap();
+            assert_eq!(
+                conn.query_row("SELECT id FROM batches WHERE qty=0", [], |r| r
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                expected
+            );
+            if enabled {
+                let tx = conn.transaction().unwrap();
+                deduct_fefo(&tx, 1, Quantity(10), None, 1, "test", "test", None).unwrap();
+                tx.commit().unwrap();
+                assert_eq!(
+                    conn.query_row("SELECT qty FROM batches WHERE id=2", [], |r| r
+                        .get::<_, i64>(0))
+                        .unwrap(),
+                    0
+                );
+            }
+        }
     }
 
     #[test]

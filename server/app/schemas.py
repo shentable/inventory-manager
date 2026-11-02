@@ -124,6 +124,7 @@ class ItemCreate(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     category: str = Field(default="", max_length=64)
     unit: str = Field(default="个", max_length=16)
+    expiry_enabled: bool = True
     shelf_life_days: int = Field(default=7, ge=1)
     min_stock: QuantityInput = Field(default=0, ge=0)
     daily_count_enabled: bool = True
@@ -136,6 +137,7 @@ class ItemUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=128)
     category: Optional[str] = Field(default=None, max_length=64)
     unit: Optional[str] = Field(default=None, max_length=16)
+    expiry_enabled: Optional[bool] = None
     shelf_life_days: Optional[int] = Field(default=None, ge=1)
     min_stock: Optional[QuantityInput] = Field(default=None, ge=0)
     daily_count_enabled: Optional[bool] = None
@@ -150,6 +152,7 @@ class ItemOut(BaseModel):
     name: str
     category: str
     unit: str
+    expiry_enabled: bool
     shelf_life_days: int
     min_stock: Quantity
     daily_count_enabled: bool
@@ -169,11 +172,12 @@ class BatchOut(BaseModel):
     item_id: int
     qty: Quantity
     initial_qty: Quantity
-    expiry_date: str
+    expiry_date: Optional[str] = None
     received_at: datetime
     source: str
     note: Optional[str]
-    days_to_expiry: int
+    expiry_enabled: bool
+    days_to_expiry: Optional[int]
 
 
 class StockMovementOut(BaseModel):
@@ -194,6 +198,7 @@ class StockItem(BaseModel):
     name: str
     category: str
     unit: str
+    expiry_enabled: bool
     shelf_life_days: int
     min_stock: Quantity
     daily_count_enabled: bool
@@ -206,18 +211,20 @@ class StockEntry(BaseModel):
     item: StockItem
     stock: Quantity
     nearest_expiry: Optional[str]
+    latest_received_at: Optional[datetime]
+    missing_expiry_count: int
     batch_count: int
 
 
 class StockReceiveItem(BaseModel):
     item_id: int
     qty: QuantityInput = Field(ge=0.1)
-    expiry_date: str
+    expiry_date: Optional[str] = None
 
     @field_validator("expiry_date")
     @classmethod
-    def _check_expiry(cls, v: str) -> str:
-        return _check_date(v)
+    def _check_expiry(cls, v: Optional[str]) -> Optional[str]:
+        return _check_date(v) if v is not None else None
 
 
 class StockReceiveIn(BaseModel):
@@ -227,15 +234,15 @@ class StockReceiveIn(BaseModel):
 
 class StockReceiptCorrectionIn(BaseModel):
     qty: QuantityInput = Field(ge=0)
-    expiry_date: str
+    expiry_date: Optional[str] = None
     note: Optional[str] = Field(default=None, max_length=255)
     reason: str = Field(min_length=1, max_length=255)
     expected_revision: int = Field(ge=0)
 
     @field_validator("expiry_date")
     @classmethod
-    def _check_expiry(cls, value: str) -> str:
-        return _check_date(value)
+    def _check_expiry(cls, value: Optional[str]) -> Optional[str]:
+        return _check_date(value) if value is not None else None
 
 
 class ExpiryEntry(BaseModel):
@@ -244,8 +251,9 @@ class ExpiryEntry(BaseModel):
     item_name: str
     unit: str
     qty: Quantity
-    expiry_date: str
-    days_to_expiry: int
+    expiry_date: Optional[str] = None
+    expiry_enabled: bool
+    days_to_expiry: Optional[int]
 
 
 # ---------- 盘点 ----------
@@ -378,6 +386,7 @@ class PurchaseCreate(BaseModel):
 
 
 class PurchaseLineOut(BaseModel):
+    expiry_enabled: bool
     id: int
     item_id: int
     item_name: str
@@ -398,12 +407,12 @@ class PurchaseOut(BaseModel):
 
 class PurchaseReceiveItem(BaseModel):
     purchase_item_id: int
-    expiry_date: str
+    expiry_date: Optional[str] = None
 
     @field_validator("expiry_date")
     @classmethod
-    def _check_expiry(cls, v: str) -> str:
-        return _check_date(v)
+    def _check_expiry(cls, v: Optional[str]) -> Optional[str]:
+        return _check_date(v) if v is not None else None
 
 
 class PurchaseReceiveIn(BaseModel):
@@ -420,3 +429,12 @@ class DashboardOut(BaseModel):
     active_purchases: int
     daily_shortages: int
     recent_counts_3d: int
+
+
+class BatchExpiryUpdateIn(BaseModel):
+    expiry_date: str
+
+    @field_validator("expiry_date")
+    @classmethod
+    def _date(cls, value: str) -> str:
+        return _check_date(value)

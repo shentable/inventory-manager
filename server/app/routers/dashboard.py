@@ -25,7 +25,7 @@ def dashboard(
     low_stock = sum(1 for it in items if item_stock(db, it.id) < it.min_stock)
     cutoff = (today() + timedelta(days=EXPIRING_SOON_DAYS)).isoformat()
     expiring = db.scalar(
-        select(func.count(Batch.id)).where(Batch.qty > 0, Batch.expiry_date <= cutoff)
+        select(func.count(Batch.id)).join(Item).where(Batch.qty > 0, Item.expiry_enabled.is_(True), Batch.expiry_date <= cutoff)
     ) or 0
     pending_waste = db.scalar(
         select(func.count(WasteRecord.id)).where(WasteRecord.status == "pending")

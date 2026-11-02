@@ -79,7 +79,7 @@ rates AS (
   FROM periods GROUP BY item_id
 ),
 item_inputs AS (
-  SELECT i.id AS item_id, i.name, i.category, i.unit, i.min_stock, i.shelf_life_days,
+  SELECT i.id AS item_id, i.name, i.category, i.unit, i.min_stock, i.shelf_life_days, i.expiry_enabled,
     i.sort_order, a.qty AS last_count_qty, a.observed_at AS last_count_at,
     a.comparison_id AS last_comparison_id, a.issue AS anchor_issue,
     julianday(:as_of) - julianday(a.observed_at) AS count_age_days,
@@ -87,8 +87,8 @@ item_inputs AS (
     r.consumption, r.waste, r.elapsed_days, r.daily_rate,
     (SELECT exclusion FROM periods p WHERE p.item_id = i.id ORDER BY observed_at DESC, comparison_id DESC LIMIT 1) AS latest_exclusion,
     coalesce((SELECT sum(qty) FROM batches WHERE item_id = i.id), 0) AS book_stock,
-    coalesce((SELECT sum(qty) FROM batches WHERE item_id = i.id AND expiry_date < date(:as_of, '+8 hours')), 0) AS expired_qty,
-    coalesce((SELECT sum(qty) FROM batches WHERE item_id = i.id AND expiry_date <= date(:as_of, '+8 hours', '+3 days')), 0) AS expiring_qty,
+    coalesce((SELECT sum(qty) FROM batches WHERE item_id = i.id AND i.expiry_enabled = 1 AND expiry_date < date(:as_of, '+8 hours')), 0) AS expired_qty,
+    coalesce((SELECT sum(qty) FROM batches WHERE item_id = i.id AND i.expiry_enabled = 1 AND expiry_date <= date(:as_of, '+8 hours', '+3 days')), 0) AS expiring_qty,
     coalesce((SELECT sum(m.delta) FROM stock_movements m WHERE m.item_id = i.id
       AND m.operation IN ('stock_receive', 'purchase_receive', 'stock_receive_correction')
       AND m.created_at > a.observed_at AND m.created_at <= :as_of), 0) AS received_since_count,
@@ -126,11 +126,13 @@ forecasts AS (
   SELECT *, estimated_qty / nullif(daily_rate, 0) AS days_remaining,
     CASE WHEN estimated_qty IS NOT NULL THEN max(0,
       min(daily_rate * (:lead_days + :coverage_days) + min_stock,
-          daily_rate * (:lead_days + shelf_life_days)) - estimated_qty)
+          CASE WHEN expiry_enabled THEN daily_rate * (:lead_days + shelf_life_days)
+            ELSE daily_rate * (:lead_days + :coverage_days) + min_stock END) - estimated_qty)
       ELSE NULL END AS replenishment_gap
   FROM estimates
 )
 SELECT json_object(
+  'expiry_enabled', json(CASE WHEN expiry_enabled THEN 'true' ELSE 'false' END),
   'item_id', f.item_id, 'name', name, 'category', category, 'unit', unit,
   'min_stock', min_stock / 10.0, 'book_stock', book_stock / 10.0,
   'last_count_qty', last_count_qty / 10.0, 'last_count_at', replace(last_count_at, ' ', 'T') || 'Z',

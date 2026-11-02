@@ -186,3 +186,23 @@ def test_roles_validation_and_cold_start(client, auth, staff_token, manager_toke
         assert row["estimated_qty"] is None
     for query in ("days=0", "days=181", "lead_days=-1", "lead_days=31", "coverage_days=0", "coverage_days=31"):
         assert client.get("/api/consumption?" + query, headers=auth(manager_token)).status_code == 422
+
+
+def test_disabled_expiry_removes_forecast_block_and_shelf_cap(client, auth, manager_token, db, scenario):
+    item, batch, actor, anchor, movement, waste = scenario
+    anchor(100, NOW-timedelta(days=9))
+    anchor(45, NOW-timedelta(days=2))
+    batch.expiry_date = '2000-01-01'
+    item.shelf_life_days = 1
+    db.commit()
+    enabled = get(client, auth, manager_token)
+    assert enabled['forecast_issue'] == 'expired_stock'
+    item.expiry_enabled = False
+    db.commit()
+    disabled = get(client, auth, manager_token)
+    assert disabled['expiry_enabled'] is False
+    assert disabled['forecast_issue'] is None
+    assert disabled['expired_qty'] == disabled['expiring_qty'] == 0
+    assert disabled['daily_rate'] == enabled['daily_rate']
+    assert disabled['consumption'] == enabled['consumption']
+    assert disabled['replenishment_gap'] > 0

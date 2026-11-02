@@ -48,7 +48,8 @@ function plusDays(date: string, days: number): string {
   return value.toISOString().slice(0, 10);
 }
 
-function daysToExpiry(date: string): number {
+function daysToExpiry(date: string | null): number | null {
+  if (date === null) return null;
   return Math.round((Date.parse(`${date}T00:00:00Z`) - Date.parse(`${businessDate()}T00:00:00Z`)) / 86_400_000);
 }
 
@@ -252,8 +253,8 @@ async function deductStatements(
   batchId?: number,
 ): Promise<D1PreparedStatement[]> {
   const query = batchId
-    ? env.DB.prepare("SELECT id, qty FROM batches WHERE id = ? AND item_id = ? ORDER BY expiry_date, id").bind(batchId, itemId)
-    : env.DB.prepare("SELECT id, qty FROM batches WHERE item_id = ? AND qty > 0 ORDER BY expiry_date, id").bind(itemId);
+    ? env.DB.prepare("SELECT id, qty FROM batches WHERE id = ? AND item_id = ? ORDER BY CASE WHEN (SELECT expiry_enabled FROM items WHERE id=batches.item_id)=1 THEN expiry_date END, received_at, id").bind(batchId, itemId)
+    : env.DB.prepare("SELECT id, qty FROM batches WHERE item_id = ? AND qty > 0 ORDER BY CASE WHEN (SELECT expiry_enabled FROM items WHERE id=batches.item_id)=1 THEN expiry_date END, received_at, id").bind(itemId);
   const rows = (await query.all<{ id: number; qty: number }>()).results;
   if (rows.reduce((sum, row) => sum + row.qty, 0) < qty) throw new ApiError(409, "库存不足");
   const statements: D1PreparedStatement[] = [
@@ -286,7 +287,7 @@ async function deductComparisonStatements(
   confirmedAt: string,
 ): Promise<D1PreparedStatement[]> {
   const rows = (await env.DB.prepare(
-    "SELECT id, qty FROM batches WHERE item_id = ? AND qty > 0 ORDER BY expiry_date, id",
+    "SELECT id, qty FROM batches WHERE item_id = ? AND qty > 0 ORDER BY CASE WHEN (SELECT expiry_enabled FROM items WHERE id=batches.item_id)=1 THEN expiry_date END, received_at, id",
   ).bind(itemId).all<{ id: number; qty: number }>()).results;
   if (rows.reduce((sum, row) => sum + row.qty, 0) < qty) throw new ApiError(409, "库存不足");
   const lookup = "(SELECT id FROM count_comparisons WHERE first_session_id = ? AND second_session_id = ? AND confirmed_by = ? AND confirmed_at = ? ORDER BY id DESC LIMIT 1)";
@@ -334,6 +335,7 @@ async function serializeItem(env: Env, id: number) {
     name: row.name,
     category: row.category,
     unit: row.unit,
+    expiry_enabled: asBool(row.expiry_enabled),
     shelf_life_days: row.shelf_life_days,
     min_stock: row.min_stock,
     daily_count_enabled: asBool(row.daily_count_enabled), daily_quantity_required: asBool(row.daily_quantity_required),
@@ -369,11 +371,11 @@ async function serializePurchase(env: Env, id: number) {
   `).bind(id).first<Record<string, unknown>>();
   if (!purchase) throw new ApiError(404, "采购单不存在");
   const lines = (await env.DB.prepare(`
-    SELECT pi.id, pi.item_id, i.name item_name, i.unit, pi.qty
+    SELECT pi.id, pi.item_id, i.name item_name, i.unit, i.expiry_enabled, pi.qty
     FROM purchase_items pi JOIN items i ON i.id = pi.item_id
     WHERE pi.purchase_id = ? ORDER BY pi.id
   `).bind(id).all()).results;
-  return { ...purchase, items: lines };
+  return { ...purchase, items: lines.map((row) => ({...row, expiry_enabled: asBool((row as Record<string, unknown>).expiry_enabled)})) };
 }
 
 async function serializeCount(env: Env, id: number, detail = true) {
@@ -569,7 +571,8 @@ async function itemRoutes(request: Request, env: Env, url: URL): Promise<Respons
       GROUP BY i.id ORDER BY i.sort_order, i.id`;
     const rows = (await env.DB.prepare(query).all<Record<string, unknown>>()).results.map((row) => ({
       id: row.id, name: row.name, category: row.category, unit: row.unit,
-      shelf_life_days: row.shelf_life_days, min_stock: row.min_stock,
+      expiry_enabled: asBool(row.expiry_enabled),
+    shelf_life_days: row.shelf_life_days, min_stock: row.min_stock,
       daily_count_enabled: asBool(row.daily_count_enabled), daily_quantity_required: asBool(row.daily_quantity_required), weekly_count_enabled: asBool(row.weekly_count_enabled),
       active: asBool(row.active), sort_order: row.sort_order, stock: Number(row.stock),
       last_count_at: row.last_count_at ?? null,
@@ -586,6 +589,7 @@ async function itemRoutes(request: Request, env: Env, url: URL): Promise<Respons
       name: text(input.name, "库存品名称", 1, 128),
       category: input.category === undefined ? "" : text(input.category, "分类", 0, 64),
       unit: input.unit === undefined ? "个" : text(input.unit, "单位", 1, 16),
+      expiry: input.expiry_enabled === undefined ? 1 : (input.expiry_enabled ? 1 : 0),
       shelf: input.shelf_life_days === undefined ? 7 : integer(input.shelf_life_days, "保质期", 1),
       minimum: input.min_stock === undefined ? 0 : integer(input.min_stock, "安全线", 0),
       dailyCount: input.daily_count_enabled === undefined ? 1 : (input.daily_count_enabled ? 1 : 0),
@@ -595,9 +599,9 @@ async function itemRoutes(request: Request, env: Env, url: URL): Promise<Respons
     };
     try {
       const result = await env.DB.prepare(`
-        INSERT INTO items(name, category, unit, shelf_life_days, min_stock, daily_count_enabled, daily_quantity_required, weekly_count_enabled, sort_order)
-        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).bind(values.name, values.category, values.unit, values.shelf, values.minimum, values.dailyCount, values.dailyQuantityRequired, values.weeklyCount, values.order).run();
+        INSERT INTO items(name, category, unit, shelf_life_days, min_stock, daily_count_enabled, daily_quantity_required, weekly_count_enabled, sort_order, expiry_enabled)
+        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(values.name, values.category, values.unit, values.shelf, values.minimum, values.dailyCount, values.dailyQuantityRequired, values.weeklyCount, values.order, values.expiry).run();
       return json(await serializeItem(env, Number(result.meta.last_row_id)), 201);
     } catch (error) {
       if (isUniqueError(error)) throw new ApiError(409, "库存品名称已存在");
@@ -616,6 +620,7 @@ async function itemRoutes(request: Request, env: Env, url: URL): Promise<Respons
       ["name", "name", (value) => text(value, "库存品名称", 1, 128)],
       ["category", "category", (value) => text(value, "分类", 0, 64)],
       ["unit", "unit", (value) => text(value, "单位", 1, 16)],
+      ["expiry_enabled", "expiry_enabled", (value) => value ? 1 : 0],
       ["shelf_life_days", "shelf_life_days", (value) => integer(value, "保质期", 1)],
       ["min_stock", "min_stock", (value) => integer(value, "安全线", 0)],
       ["daily_count_enabled", "daily_count_enabled", (value) => value ? 1 : 0],
@@ -640,8 +645,8 @@ async function itemRoutes(request: Request, env: Env, url: URL): Promise<Respons
     await authenticate(request, env);
     const id = Number(batches[1]);
     if (!await itemExists(env.DB, id)) throw new ApiError(404, "库存品不存在");
-    const rows = (await env.DB.prepare("SELECT * FROM batches WHERE item_id = ? ORDER BY expiry_date, id").bind(id).all<Record<string, unknown>>()).results;
-    return json(rows.map((row) => ({ ...row, days_to_expiry: daysToExpiry(String(row.expiry_date)) })));
+    const rows = (await env.DB.prepare("SELECT batches.*, (SELECT expiry_enabled FROM items WHERE id=batches.item_id) expiry_enabled FROM batches WHERE item_id = ? ORDER BY CASE WHEN (SELECT expiry_enabled FROM items WHERE id=batches.item_id)=1 THEN expiry_date END, received_at, id").bind(id).all<Record<string, unknown>>()).results;
+    return json(rows.map((row) => ({ ...row, expiry_enabled: asBool(row.expiry_enabled), days_to_expiry: asBool(row.expiry_enabled) && row.expiry_date ? daysToExpiry(String(row.expiry_date)) : null })));
   }
   const movements = pathname.match(/^\/api\/items\/(\d+)\/movements$/);
   if (request.method === "GET" && movements) {
@@ -658,6 +663,26 @@ async function itemRoutes(request: Request, env: Env, url: URL): Promise<Respons
 }
 
 async function stockRoutes(request: Request, env: Env, url: URL): Promise<Response | null> {
+  const fill = url.pathname.match(/^\/api\/batches\/(\d+)\/expiry$/);
+  if (request.method === "PATCH" && fill) {
+    const actor = await authenticate(request, env, "manager");
+    const id = Number(fill[1]);
+    const input = await body(request);
+    const date = text(input.expiry_date, "效期", 10, 10);
+    if (!validDate(date)) throw new ApiError(400, "效期必须为有效日期 YYYY-MM-DD");
+    const row = await env.DB.prepare("SELECT b.*, i.expiry_enabled FROM batches b JOIN items i ON i.id=b.item_id WHERE b.id=?").bind(id).first<{id:number; item_id:number; qty:number; expiry_date:string|null; expiry_enabled:number}>();
+    if (!row) throw new ApiError(404, "批次不存在");
+    if (!row.expiry_enabled || row.qty <= 0 || row.expiry_date !== null) throw new ApiError(409, "仅可补填已启用效期且有库存的未知效期批次");
+    const statements = [
+      env.DB.prepare("UPDATE batches SET expiry_date=? WHERE id=? AND expiry_date IS NULL AND qty>0 AND EXISTS(SELECT 1 FROM items WHERE id=batches.item_id AND expiry_enabled=1)").bind(date, id),
+      guard(env.DB, "changes()=1"),
+      env.DB.prepare("INSERT INTO batch_expiry_updates(batch_id, old_expiry_date, new_expiry_date, actor_id) VALUES(?,NULL,?,?)").bind(id, date, actor.id),
+      env.DB.prepare("DELETE FROM _transaction_guard"),
+    ];
+    try { await env.DB.batch(statements); } catch { throw new ApiError(409, "批次已变化，请刷新后重试"); }
+    return json({id, item_id:row.item_id, expiry_date:date});
+  }
+
   if (request.method === "POST" && url.pathname === "/api/stock/receive") {
     const manager = await authenticate(request, env, "manager");
     const input = await body(request);
@@ -665,8 +690,8 @@ async function stockRoutes(request: Request, env: Env, url: URL): Promise<Respon
     const lines = input.items.map((raw) => {
       if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new ApiError(400, "入库条目格式无效");
       const line = raw as Record<string, unknown>;
-      const expiry = text(line.expiry_date, "效期", 10, 10);
-      if (!validDate(expiry)) throw new ApiError(400, "效期必须为有效日期 YYYY-MM-DD");
+      const expiry = line.expiry_date == null ? null : text(line.expiry_date, "效期", 10, 10);
+      if (expiry !== null && !validDate(expiry)) throw new ApiError(400, "效期必须为有效日期 YYYY-MM-DD");
       return {
         item_id: integer(line.item_id, "库存品", 1),
         qty: integer(line.qty, "入库数量", 1),
@@ -674,7 +699,12 @@ async function stockRoutes(request: Request, env: Env, url: URL): Promise<Respon
       };
     });
     if (new Set(lines.map((line) => line.item_id)).size !== lines.length) throw new ApiError(400, "入库条目重复");
-    for (const line of lines) if (!await itemExists(env.DB, line.item_id)) throw new ApiError(400, `库存品不存在：${line.item_id}`);
+    for (const line of lines) {
+      const item = await env.DB.prepare("SELECT expiry_enabled FROM items WHERE id=?").bind(line.item_id).first<{expiry_enabled: number}>();
+      if (!item) throw new ApiError(400, `库存品不存在：${line.item_id}`);
+      if (item.expiry_enabled && line.expiry_date === null) throw new ApiError(400, "启用效期的库存品必须填写效期");
+      if (!item.expiry_enabled) line.expiry_date = null;
+    }
     const note = nullableText(input.note, 255);
     const statements: D1PreparedStatement[] = [];
     for (const line of lines) {
@@ -684,26 +714,30 @@ async function stockRoutes(request: Request, env: Env, url: URL): Promise<Respon
     const results = await env.DB.batch(statements);
     const batchIds = lines.map((_, index) => Number(results[index * 2].meta.last_row_id));
     const batches = await Promise.all(batchIds.map(async (id) => {
-      const row = await env.DB.prepare("SELECT * FROM batches WHERE id = ?").bind(id).first<Record<string, unknown>>();
-      return { ...row, days_to_expiry: daysToExpiry(String(row!.expiry_date)) };
+      const row = await env.DB.prepare("SELECT batches.*, (SELECT expiry_enabled FROM items WHERE id=batches.item_id) expiry_enabled FROM batches WHERE id = ?").bind(id).first<Record<string, unknown>>();
+      return { ...row, expiry_enabled: asBool(row!.expiry_enabled), days_to_expiry: asBool(row!.expiry_enabled) && row!.expiry_date ? daysToExpiry(String(row!.expiry_date)) : null };
     }));
     return json(batches, 201);
   }
   if (request.method === "GET" && url.pathname === "/api/stock") {
     await authenticate(request, env);
     const rows = (await env.DB.prepare(`
-      SELECT i.id, i.name, i.category, i.unit, i.shelf_life_days, i.min_stock,
+      SELECT i.id, i.name, i.category, i.unit, i.shelf_life_days, i.min_stock, i.expiry_enabled,
              i.daily_count_enabled, i.daily_quantity_required, i.weekly_count_enabled, i.active,
              COALESCE(SUM(CASE WHEN b.qty > 0 THEN b.qty ELSE 0 END), 0) stock,
-             MIN(CASE WHEN b.qty > 0 THEN b.expiry_date END) nearest_expiry,
+             MIN(CASE WHEN b.qty > 0 AND i.expiry_enabled=1 THEN b.expiry_date END) nearest_expiry,
+             MAX(CASE WHEN b.qty > 0 THEN b.received_at END) latest_received_at,
+             COUNT(CASE WHEN b.qty > 0 AND i.expiry_enabled=1 AND b.expiry_date IS NULL THEN 1 END) missing_expiry_count,
              COUNT(CASE WHEN b.qty > 0 THEN 1 END) batch_count
       FROM items i LEFT JOIN batches b ON b.item_id = i.id
       WHERE i.active = 1 GROUP BY i.id ORDER BY i.sort_order, i.id
     `).all<Record<string, unknown>>()).results;
     return json(rows.map((row) => ({
       item: { id: row.id, name: row.name, category: row.category, unit: row.unit,
-        shelf_life_days: row.shelf_life_days, min_stock: row.min_stock,
+        expiry_enabled: asBool(row.expiry_enabled),
+    shelf_life_days: row.shelf_life_days, min_stock: row.min_stock,
         daily_count_enabled: asBool(row.daily_count_enabled), daily_quantity_required: asBool(row.daily_quantity_required), weekly_count_enabled: asBool(row.weekly_count_enabled), active: true },
+      latest_received_at: row.latest_received_at, missing_expiry_count: Number(row.missing_expiry_count),
       stock: Number(row.stock), nearest_expiry: row.nearest_expiry, batch_count: Number(row.batch_count),
     })));
   }
@@ -712,11 +746,11 @@ async function stockRoutes(request: Request, env: Env, url: URL): Promise<Respon
     const days = Number(url.searchParams.get("days") ?? "3");
     if (!Number.isInteger(days) || days < 0) throw new ApiError(400, "天数格式无效");
     const rows = (await env.DB.prepare(`
-      SELECT b.id batch_id, b.item_id, i.name item_name, i.unit, b.qty, b.expiry_date
+      SELECT b.id batch_id, b.item_id, i.name item_name, i.unit, i.expiry_enabled, b.qty, b.expiry_date
       FROM batches b JOIN items i ON i.id = b.item_id
-      WHERE b.qty > 0 AND b.expiry_date <= ? ORDER BY b.expiry_date, b.id
+      WHERE b.qty > 0 AND i.expiry_enabled=1 AND b.expiry_date <= ? ORDER BY b.expiry_date, b.id
     `).bind(plusDays(businessDate(), days)).all<Record<string, unknown>>()).results;
-    return json(rows.map((row) => ({ ...row, days_to_expiry: daysToExpiry(String(row.expiry_date)) })));
+    return json(rows.map((row) => ({ ...row, expiry_enabled: asBool(row.expiry_enabled), days_to_expiry: asBool(row.expiry_enabled) && row.expiry_date ? daysToExpiry(String(row.expiry_date)) : null })));
   }
   return null;
 }
@@ -966,8 +1000,8 @@ async function countRoutes(request: Request, env: Env, url: URL): Promise<Respon
       statements.push(env.DB.prepare("UPDATE count_entries SET reviewed_qty = ? WHERE session_id = ? AND item_id = ?").bind(review.qty, id, entry.item_id));
       if (diff < 0) statements.push(...await deductStatements(env, entry.item_id, -diff, manager.id, "count_shortage", "count", id));
       if (diff > 0) {
-        const item = await env.DB.prepare("SELECT shelf_life_days FROM items WHERE id = ?").bind(entry.item_id).first<{ shelf_life_days: number }>();
-        statements.push(env.DB.prepare("INSERT INTO batches(item_id, qty, initial_qty, expiry_date, source, note) VALUES(?, ?, ?, ?, 'adjust', '盘盈')").bind(entry.item_id, diff, diff, plusDays(businessDate(), item!.shelf_life_days)));
+        const item = await env.DB.prepare("SELECT shelf_life_days, expiry_enabled FROM items WHERE id = ?").bind(entry.item_id).first<{ shelf_life_days: number; expiry_enabled: number }>();
+        statements.push(env.DB.prepare("INSERT INTO batches(item_id, qty, initial_qty, expiry_date, source, note) VALUES(?, ?, ?, ?, 'adjust', '盘盈')").bind(entry.item_id, diff, diff, item!.expiry_enabled ? plusDays(businessDate(), item!.shelf_life_days) : null));
         statements.push(env.DB.prepare("INSERT INTO stock_movements(item_id, batch_id, delta, operation, reference_type, reference_id, actor_id) VALUES(?, last_insert_rowid(), ?, 'count_surplus', 'count', ?, ?)").bind(entry.item_id, diff, id, manager.id));
       }
     }
@@ -1184,9 +1218,9 @@ async function countComparisonRoutes(request: Request, env: Env, url: URL): Prom
       );
       statements.push(...deductions);
     } else if (delta > 0) {
-      const item = await env.DB.prepare("SELECT shelf_life_days FROM items WHERE id = ?").bind(row.item_id).first<{ shelf_life_days: number }>();
+      const item = await env.DB.prepare("SELECT shelf_life_days, expiry_enabled FROM items WHERE id = ?").bind(row.item_id).first<{ shelf_life_days: number; expiry_enabled: number }>();
       statements.push(env.DB.prepare("INSERT INTO batches(item_id, qty, initial_qty, expiry_date, source, note) VALUES(?, ?, ?, ?, 'adjust', '双人盘点盘盈')")
-        .bind(row.item_id, delta, delta, plusDays(businessDate(), item!.shelf_life_days)));
+        .bind(row.item_id, delta, delta, item!.expiry_enabled ? plusDays(businessDate(), item!.shelf_life_days) : null));
       statements.push(env.DB.prepare(`INSERT INTO stock_movements(item_id, batch_id, delta, operation, reference_type, reference_id, actor_id) VALUES(?, last_insert_rowid(), ?, 'count_surplus', 'count_comparison', ${lookup}, ?)`)
         .bind(row.item_id, delta, ...lookupValues, actor.id));
     }
@@ -1304,13 +1338,13 @@ async function purchaseRoutes(request: Request, env: Env, url: URL): Promise<Res
     }
     const input = await body(request);
     if (!Array.isArray(input.items) || input.items.length === 0) throw new ApiError(400, "入库条目不能为空");
-    const expiry = new Map<number, string>();
+    const expiry = new Map<number, string | null>();
     for (const raw of input.items) {
       if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new ApiError(400, "入库条目格式无效");
       const line = raw as Record<string, unknown>;
       const lineId = integer(line.purchase_item_id, "采购行", 1);
-      const date = text(line.expiry_date, "效期", 10, 10);
-      if (!validDate(date)) throw new ApiError(400, "效期必须为有效日期 YYYY-MM-DD");
+      const date = line.expiry_date == null ? null : text(line.expiry_date, "效期", 10, 10);
+      if (date !== null && !validDate(date)) throw new ApiError(400, "效期必须为有效日期 YYYY-MM-DD");
       expiry.set(lineId, date);
     }
     const lines = (await env.DB.prepare("SELECT * FROM purchase_items WHERE purchase_id = ? ORDER BY id").bind(id).all<{ id: number; item_id: number; qty: number }>()).results;
@@ -1320,6 +1354,9 @@ async function purchaseRoutes(request: Request, env: Env, url: URL): Promise<Res
       guard(env.DB, "changes() = 1"),
     ];
     for (const line of lines) {
+      const item = await env.DB.prepare("SELECT expiry_enabled FROM items WHERE id=?").bind(line.item_id).first<{expiry_enabled: number}>();
+      if (item!.expiry_enabled && expiry.get(line.id) == null) throw new ApiError(400, "启用效期的库存品必须填写效期");
+      if (!item!.expiry_enabled) expiry.set(line.id, null);
       statements.push(env.DB.prepare("INSERT INTO batches(item_id, qty, initial_qty, expiry_date, source, note) VALUES(?, ?, ?, ?, 'purchase', ?)").bind(line.item_id, line.qty, line.qty, expiry.get(line.id)!, `采购单 #${id}`));
       statements.push(env.DB.prepare("INSERT INTO stock_movements(item_id, batch_id, delta, operation, reference_type, reference_id, actor_id) VALUES(?, last_insert_rowid(), ?, 'purchase_receive', 'purchase', ?, ?)").bind(line.item_id, line.qty, id, manager.id));
     }
@@ -1340,7 +1377,7 @@ async function dashboard(request: Request, env: Env): Promise<Response> {
   const row = await env.DB.prepare(`
     SELECT
       (SELECT COUNT(*) FROM items i WHERE i.active = 1 AND COALESCE((SELECT SUM(qty) FROM batches b WHERE b.item_id = i.id), 0) < i.min_stock) low_stock,
-      (SELECT COUNT(*) FROM batches WHERE qty > 0 AND expiry_date <= ?) expiring_soon,
+      (SELECT COUNT(*) FROM batches b JOIN items i ON i.id=b.item_id WHERE b.qty > 0 AND i.expiry_enabled=1 AND b.expiry_date <= ?) expiring_soon,
       (SELECT COUNT(*) FROM waste_records WHERE status = 'pending') pending_waste,
       (SELECT COUNT(*) FROM count_sessions WHERE count_type = 'weekly' AND status = 'submitted' AND datetime(created_at) >= datetime('now', '-72 hours')) pending_counts,
       (SELECT COUNT(*) FROM purchases WHERE status = 'ordered') active_purchases,

@@ -817,3 +817,10 @@ body.offline-readonly #app { padding-top: 72px; }
 .owner-consumption-card .owner-daily-reference .owner-note { line-height: 1.45; margin-top: 3px; }
 .owner-consumption-card .owner-detail-link { min-height: 36px; font-size: 12px; }
 @media (max-width: 360px) { .owner-card-summary { gap: 8px; } .owner-card-summary .owner-confirmed-count { padding-left: 8px; } }
+
+/* Keep optional expiry controls usable on phone-sized batch sheets. */
+.expiry-toggle { margin-block: 8px; }
+.batch-row:has(.batch-expiry-fill) { flex-wrap: wrap; }
+.batch-expiry-fill { display: flex; gap: 8px; width: 100%; align-items: center; }
+.batch-expiry-fill .input { flex: 1; min-width: 0; }
+.batch-expiry-fill .btn { flex-shrink: 0; }

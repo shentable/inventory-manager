@@ -66,6 +66,13 @@
   function itemName(it, fallback) {
     return it.item_name || (it.item && it.item.name) || fallback || I18N.t('商品');
   }
+  function expiryEnabled(row) {
+    return row && row.expiry_enabled !== undefined ? row.expiry_enabled !== false : !(row && row.item && row.item.expiry_enabled === false);
+  }
+  function expiryLabel(row, date) {
+    if (!expiryEnabled(row)) { return I18N.t('不管理效期'); }
+    return date ? I18N.t('效期：{date}', { date: date }) : I18N.t('待补效期');
+  }
   function roleLabel(r) { return ROLE_LABEL[r] || r || ''; }
 
   /* 固定底部栏管理：children 传 null 表示移除。
@@ -958,15 +965,15 @@
         body.appendChild(info);
         body.appendChild(qtyBox);
         var near = batches.filter(function (b) {
-          return b.qty > 0 && (b.days_to_expiry === null || b.days_to_expiry === undefined || b.days_to_expiry <= 7);
+          return b.qty > 0 && (!expiryEnabled(it) || !b.expiry_date || b.days_to_expiry === null || b.days_to_expiry === undefined || b.days_to_expiry <= 7);
         });
         if (near.length) {
           batchBox.appendChild(h('div', { class: 'sec-label' }, I18N.t('指定批次（可选，默认 FEFO 自动扣减）')));
           var chipItems = near.map(function (b) {
-            var exp = (b.expiry_date || '').slice(5) || '?';
+            var exp = !expiryEnabled(it) ? I18N.t('入库 {date}', { date: fmtDateTime(b.received_at) }) : (b.expiry_date || '').slice(5) || I18N.t('待补效期');
             var d = b.days_to_expiry;
             var dTxt = '';
-            if (d !== null && d !== undefined) {
+            if (expiryEnabled(it) && b.expiry_date && d !== null && d !== undefined) {
               if (d < 0) { dTxt = ' · ' + I18N.t('已过期{n}天', { n: -d }); }
               else if (d === 0) { dTxt = ' · ' + I18N.t('今天到期'); }
               else { dTxt = ' · ' + I18N.t('还有{n}天', { n: d }); }
@@ -999,7 +1006,7 @@
       if (state.batchId && state.batches.length) {
         for (var i = 0; i < state.batches.length; i++) {
           if (Number(state.batches[i].id) === Number(state.batchId)) {
-            batchTxt = I18N.t('批次效期 {date}', { date: state.batches[i].expiry_date || '—' });
+            batchTxt = expiryEnabled(state.item) ? expiryLabel(state.item, state.batches[i].expiry_date) : I18N.t('入库 {date}', { date: fmtDateTime(state.batches[i].received_at) });
             break;
           }
         }
@@ -1131,7 +1138,7 @@
           h('div', { class: 'expiry-sub' }, I18N.t('效期 {date} · 剩 {qty} {unit}', { date: r.expiry_date || '—', qty: r.qty, unit: r.unit || '' }))
         );
         var daysEl = h('div', { class: 'expiry-days' });
-        if (d === null || d === undefined) { daysEl.textContent = '—'; }
+        if (!r.expiry_date || d === null || d === undefined) { daysEl.textContent = I18N.t('待补效期'); }
         else if (d < 0) { daysEl.textContent = I18N.t('已过期 {n} 天', { n: -d }); daysEl.classList.add('bad'); }
         else if (d === 0) { daysEl.textContent = I18N.t('今天到期'); daysEl.classList.add('bad'); }
         else if (d <= 3) { daysEl.textContent = I18N.t('还有 {n} 天', { n: d }); daysEl.classList.add('soon'); }
@@ -1166,6 +1173,7 @@
     return API.expiry(7).then(function (rows) {
       rows = rows || [];
       rows.forEach(function (r) {
+        if (!expiryEnabled(r) || !r.expiry_date) { return; }
         var d = r.days_to_expiry;
         var idx;
         if (d === null || d === undefined) { idx = 2; }
@@ -1941,7 +1949,7 @@
             ),
             h('div', { class: 'wc-tags' },
               h('span', { class: 'tag' }, w.reason ? I18N.t(w.reason) : '—'),
-              w.batch_expiry_date ? h('span', { class: 'tag' }, I18N.t('批次效期 {date}', { date: w.batch_expiry_date })) : null
+              expiryEnabled(w) && w.batch_expiry_date ? h('span', { class: 'tag' }, I18N.t('批次效期 {date}', { date: w.batch_expiry_date })) : null
             ),
             h('div', { class: 'rc-sub' }, reporter + ' · ' + fmtDateTime(w.reported_at)),
             w.description ? h('div', { class: 'waste-description-view' }, w.description) : null,
@@ -2036,12 +2044,17 @@
       back.addEventListener('click', function () { renderSelect(allItems); });
       content.appendChild(h('div', { class: 'recv-head' },
         back,
-        h('div', { class: 'recv-title' }, I18N.t('填写入库效期'))
+        h('div', { class: 'recv-title' }, I18N.t(selected.some(expiryEnabled) ? '填写入库效期' : '确认入库'))
       ));
 
       var expiryState = {};
       var listWrap = h('div', { class: 'recv-list' });
       selected.forEach(function (it) {
+        if (!expiryEnabled(it)) {
+          expiryState[it.id] = null;
+          listWrap.appendChild(h('div', { class: 'recv-card' }, h('div', { class: 'recv-name' }, I18N.t('{name}（入 {qty} {unit}）', { name: it.name, qty: quantities[it.id], unit: it.unit || '' }))));
+          return;
+        }
         var shelf = Number(it.shelf_life_days || 7);
         if (!(shelf >= 1)) { shelf = 7; }
         expiryState[it.id] = datePlus(shelf);
@@ -2104,7 +2117,7 @@
         var lines = selected.map(function (it) {
           return { item_id: it.id, qty: quantities[it.id], expiry_date: expiryState[it.id] };
         });
-        if (lines.some(function (line) { return !line.expiry_date; })) {
+        if (selected.some(function (it) { return expiryEnabled(it) && !expiryState[it.id]; })) {
           window.UI.toast(I18N.t('请为所有明细选择效期'), 'warn');
           return;
         }
@@ -2147,7 +2160,7 @@
       var search = h('input', { class: 'search-input', type: 'search', placeholder: I18N.t('搜索库存品…') });
       var listWrap = h('div', {});
       var filtered = items.slice();
-      var next = h('button', { class: 'btn btn-primary btn-block' }, I18N.t('下一步：填写效期'));
+      var next = h('button', { class: 'btn btn-primary btn-block' }, I18N.t('下一步：确认入库'));
 
       function selectedItems() {
         return items.filter(function (it) { return quantities[it.id] > 0; });
@@ -2171,6 +2184,7 @@
               quantities[it.id] = value;
               row.classList.toggle('changed', value > 0);
               next.disabled = selectedItems().length < 1;
+              next.textContent = I18N.t(selectedItems().some(expiryEnabled) ? '下一步：填写效期' : '下一步：确认入库');
             }
           });
           row.appendChild(stepper.el);
@@ -2186,13 +2200,14 @@
         paint();
       });
       next.disabled = selectedItems().length < 1;
+      next.textContent = I18N.t(selectedItems().some(expiryEnabled) ? '下一步：填写效期' : '下一步：确认入库');
       next.addEventListener('click', function () {
         if (!window.UI.validateQuantities(root, quantities)) { return; }
         var selected = selectedItems();
         if (selected.length) { renderExpiry(selected, items); }
       });
       content.appendChild(h('div', { class: 'recv-title receive-page-title' }, I18N.t('直接入库')));
-      content.appendChild(h('div', { class: 'page-hint' }, I18N.t('选择到货商品和数量，再填写每批效期。')));
+      content.appendChild(h('div', { class: 'page-hint' }, I18N.t('选择到货商品和数量；管理效期的商品需填写效期。')));
       content.appendChild(search);
       content.appendChild(listWrap);
       paint();
@@ -2241,14 +2256,15 @@
         var form = h('form', { class: 'receipt-edit' });
         var amount = h('input', { class: 'input quantity-input', type: 'number', inputmode: 'decimal', min: '0', max: '1000000000', step: '0.1', required: 'required', value: window.UI.formatQuantity(row.qty), 'aria-label': I18N.t('更正后入库数量') });
         amount.disabled = row.quantity_locked;
-        var expiry = h('input', { class: 'input', type: 'date', required: 'required', value: row.expiry_date, 'aria-label': I18N.t('更正后效期') });
+        var expiry = h('input', { class: 'input', type: 'date', required: 'required', value: row.expiry_date || '', 'aria-label': I18N.t('更正后效期') });
+        expiry.required = expiryEnabled(row);
         var note = h('textarea', { class: 'input', maxlength: '255', 'aria-label': I18N.t('入库备注') }, row.note || '');
         var reason = h('textarea', { class: 'input', required: 'required', maxlength: '255', 'aria-label': I18N.t('更正原因') });
         form.appendChild(window.UI.field(I18N.t('更正后入库数量') + '（' + row.unit + '）', amount));
         form.appendChild(h('p', { class: 'page-hint' }, row.quantity_locked ?
           I18N.t('已有后续确认盘点，数量请重新盘点核实；效期和备注仍可更正。') :
           I18N.t('填写整笔入库的正确数量，系统按差额调整。数量填 0 可撤销尚未扣减的入库；商品选错请撤销后重新入库。')));
-        form.appendChild(window.UI.field(I18N.t('更正后效期'), expiry));
+        if (expiryEnabled(row)) { form.appendChild(window.UI.field(I18N.t('更正后效期'), expiry)); }
         form.appendChild(window.UI.field(I18N.t('入库备注'), note));
         form.appendChild(window.UI.field(I18N.t('更正原因'), reason));
         var submit = h('button', { class: 'btn btn-primary btn-block', type: 'submit' }, I18N.t('保存更正'));
@@ -2267,7 +2283,7 @@
             }), options: [{ label: I18N.t('保存更正'), value: true, kind: 'primary' }, { label: I18N.t('取消'), value: null, kind: 'ghost' }]
           }).then(function (ok) {
             if (!ok) { return; }
-            return API.correctReceipt(row.id, { qty: newQty, expiry_date: expiry.value, note: note.value.trim() || null,
+            return API.correctReceipt(row.id, { qty: newQty, expiry_date: expiryEnabled(row) ? expiry.value : null, note: note.value.trim() || null,
               reason: reason.value.trim(), expected_revision: row.revision }).then(function () {
               window.UI.toast(I18N.t('入库更正已保存'), 'success');
               showDetail(row.id);
@@ -2283,7 +2299,7 @@
           history.appendChild(h('article', { class: 'receipt-card' },
             h('strong', {}, change.actor_name + ' · ' + fmtDateTime(change.created_at)),
             h('p', {}, qty(change.old_qty, row.unit) + ' → ' + qty(change.new_qty, row.unit)),
-            h('p', {}, change.old_expiry_date + ' → ' + change.new_expiry_date),
+            h('p', {}, (change.old_expiry_date || '—') + ' → ' + (change.new_expiry_date || '—')),
             h('p', {}, I18N.t('备注') + '：' + (change.old_note || '—') + ' → ' + (change.new_note || '—')),
             h('p', {}, I18N.t('更正原因') + '：' + change.reason)
           ));
@@ -2319,7 +2335,7 @@
               h('h3', {}, row.item_name),
               h('p', {}, I18N.t('入库 {qty} · 批次剩余 {remaining}', { qty: qty(row.qty, row.unit), remaining: qty(row.remaining_qty, row.unit) })),
               h('p', { class: 'page-hint' }, I18N.t('批次 #{id} · {name} · {time}', { id: row.id, name: row.received_by_name, time: fmtDateTime(row.received_at) })),
-              h('p', {}, I18N.t('效期：{date}', { date: row.expiry_date })),
+              expiryEnabled(row) ? h('p', {}, expiryLabel(row, row.expiry_date)) : null,
               row.note ? h('p', {}, row.note) : null, button
             ));
           });
@@ -2601,6 +2617,11 @@
       var expiryState = {};
       var listWrap = h('div', { class: 'recv-list' });
       items.forEach(function (li) {
+        if (!expiryEnabled(li)) {
+          expiryState[li.id] = null;
+          listWrap.appendChild(h('div', { class: 'recv-card' }, h('div', { class: 'recv-name' }, I18N.t('{name}（订 {qty} {unit}）', { name: itemName(li), qty: li.qty, unit: li.unit || (li.item && li.item.unit) || '' }))));
+          return;
+        }
         var shelf = li.shelf_life_days;
         if (shelf === null || shelf === undefined || !(shelf >= 1)) {
           shelf = (li.item && li.item.shelf_life_days) || 7;
@@ -2661,9 +2682,8 @@
 
       var submit = h('button', { class: 'btn btn-primary btn-block' }, I18N.t('确认入库'));
       submit.addEventListener('click', function () {
-        var payload = items.filter(function (li) { return !!expiryState[li.id]; })
-          .map(function (li) { return { purchase_item_id: li.id, expiry_date: expiryState[li.id] }; });
-        if (payload.length !== items.length) {
+        var payload = items.map(function (li) { return { purchase_item_id: li.id, expiry_date: expiryState[li.id] }; });
+        if (items.some(function (li) { return expiryEnabled(li) && !expiryState[li.id]; })) {
           window.UI.toast(I18N.t('请为所有明细选择效期'), 'warn');
           return;
         }
@@ -2767,7 +2787,7 @@
               h('div', { class: 'item-name' }, it.name, it.active === false ? h('span', { class: 'tag muted' }, ' ' + I18N.t('已停用')) : null),
               h('div', { class: 'item-sub' },
                 I18N.t(it.category || '未分类') + ' · ' + (it.unit || '') +
-                ' · ' + (it.shelf_life_days !== null && it.shelf_life_days !== undefined ? I18N.t('效期 {n}天', { n: it.shelf_life_days }) : I18N.t('效期 —')) +
+                ' · ' + (!expiryEnabled(it) ? I18N.t('不管理效期') : it.shelf_life_days !== null && it.shelf_life_days !== undefined ? I18N.t('效期 {n}天', { n: it.shelf_life_days }) : I18N.t('效期 —')) +
                 ' · ' + I18N.t('最低 {n}', { n: it.min_stock !== null && it.min_stock !== undefined ? it.min_stock : '0' })
               ),
               h('div', { class: 'item-count-scope' },
@@ -2896,6 +2916,11 @@
         });
       });
       var shelfInput = h('input', { class: 'input', type: 'number', inputmode: 'numeric', min: '1', placeholder: I18N.t('如：7'), value: item && item.shelf_life_days !== null && item.shelf_life_days !== undefined ? item.shelf_life_days : '' });
+      var expiryInput = h('input', { type: 'checkbox', 'aria-label': I18N.t('启用效期') });
+      expiryInput.checked = expiryEnabled(item);
+      var shelfField = window.UI.field(I18N.t('效期天数 *（从入库起算）'), shelfInput);
+      shelfField.hidden = !expiryInput.checked; shelfField.style.display = expiryInput.checked ? '' : 'none';
+      expiryInput.addEventListener('change', function () { shelfField.hidden = !expiryInput.checked; shelfField.style.display = expiryInput.checked ? '' : 'none'; });
       var minInput = h('input', { class: 'input quantity-input', type: 'number', inputmode: 'decimal', min: '0', step: '0.1', placeholder: I18N.t('如：2'), value: item && item.min_stock !== null && item.min_stock !== undefined ? item.min_stock : '0' });
       var dailyCountInput = h('input', { type: 'checkbox' });
       var weeklyCountInput = h('input', { type: 'checkbox' });
@@ -2908,7 +2933,8 @@
         window.UI.field(I18N.t('名称 *'), nameInput),
         window.UI.field(I18N.t('分类 *'), catSelect),
         window.UI.field(I18N.t('单位 *'), unitSelect),
-        window.UI.field(I18N.t('效期天数 *（从入库起算）'), shelfInput),
+        h('label', { class: 'count-scope-option expiry-toggle' }, expiryInput, h('span', {}, h('strong', {}, I18N.t('启用效期')), h('small', {}, I18N.t('关闭后入库无需填写效期，保留原效期天数配置')))),
+        shelfField,
         window.UI.field(I18N.t('最低库存（低于此值预警）'), minInput),
         h('div', { class: 'count-scope-field' },
           h('div', { class: 'field-label' }, I18N.t('盘点范围')),
@@ -2930,9 +2956,10 @@
         if (!name) { window.UI.toast(I18N.t('请填写名称'), 'warn'); return; }
         if (!cat) { window.UI.toast(I18N.t('请选择或新增分类'), 'warn'); return; }
         if (!unit) { window.UI.toast(I18N.t('请选择或新增单位'), 'warn'); return; }
-        if (isNaN(shelf) || shelf < 1) { window.UI.toast(I18N.t('效期天数至少为 1'), 'warn'); return; }
+        if (expiryInput.checked && (isNaN(shelf) || shelf < 1)) { window.UI.toast(I18N.t('效期天数至少为 1'), 'warn'); return; }
         var payload = {
-          name: name, category: cat, unit: unit, shelf_life_days: shelf,
+          name: name, category: cat, unit: unit, expiry_enabled: expiryInput.checked,
+          shelf_life_days: expiryInput.checked ? shelf : (item ? item.shelf_life_days : null),
           min_stock: isNaN(min) || min < 0 ? 0 : min,
           daily_count_enabled: dailyCountInput.checked,
           daily_quantity_required: dailyQuantityInput.checked,
@@ -3027,7 +3054,7 @@
       var visible = data.items.filter(function (row) {
         return (row.name + ' ' + row.category).toLowerCase().indexOf(q) >= 0 &&
           (activeFilter === 'all' || (activeFilter === 'urgent' && (row.status === 'shortage' || row.status === 'reorder')) ||
-          (activeFilter === 'review' && row.forecast_issue) || (activeFilter === 'expiry' && row.expiring_qty > 0));
+          (activeFilter === 'review' && row.forecast_issue) || (activeFilter === 'expiry' && expiryEnabled(row) && row.expiring_qty > 0));
       });
       if (!visible.length) { list.appendChild(window.UI.emptyView(I18N.t('没有匹配的库存品'))); }
       visible.forEach(function (row) {
@@ -3048,7 +3075,7 @@
           card.appendChild(h('p', { class: 'consumption-warning' }, issueLabels[row.forecast_issue] || row.forecast_issue));
         }
         if (row.daily_shortage) { card.appendChild(h('p', { class: 'consumption-warning' }, I18N.t('现场反馈优先，请核实余量并安排补货。'))); }
-        if (row.expiring_qty > 0) {
+        if (expiryEnabled(row) && row.expiring_qty > 0) {
           card.appendChild(h('p', { class: 'consumption-warning' }, I18N.t('3 天内到期及已过期账面数量：{qty}', { qty: quantity(row.expiring_qty, row.unit) })));
         }
         if (row.replenishment_gap !== null) {
@@ -3098,7 +3125,7 @@
           { key: 'all', label: I18N.t('全部'), count: data.items.length },
           { key: 'urgent', label: I18N.t('优先补货'), count: data.items.filter(function (r) { return r.status === 'shortage' || r.status === 'reorder'; }).length },
           { key: 'review', label: I18N.t('待核查'), count: data.items.filter(function (r) { return r.forecast_issue; }).length },
-          { key: 'expiry', label: I18N.t('临期核实'), count: data.items.filter(function (r) { return r.expiring_qty > 0; }).length }
+          { key: 'expiry', label: I18N.t('临期核实'), count: data.items.filter(function (r) { return expiryEnabled(r) && r.expiring_qty > 0; }).length }
         ];
         var filterBar = h('div', { class: 'consumption-filters', 'aria-label': I18N.t('筛选库存品') });
         filters.forEach(function (f) {
@@ -3175,7 +3202,7 @@
               (it.category || '') +
               (r.batch_count !== null && r.batch_count !== undefined ? ' · ' + I18N.t('{n} 个批次', { n: r.batch_count }) : '') +
               ' · ' + I18N.t('安全线 {n} {unit}', { n: minStock, unit: it.unit || '' }) +
-              ' · ' + I18N.t('最近效期 {date}', { date: r.nearest_expiry || '—' })
+              (expiryEnabled(it) ? (r.nearest_expiry ? ' · ' + I18N.t('最早到期 {date}', { date: r.nearest_expiry }) : '') + (r.missing_expiry_count > 0 ? ' · ' + I18N.t('{n} 批待补效期', { n: r.missing_expiry_count }) : '') : (r.latest_received_at ? ' · ' + I18N.t('入库 {date}', { date: fmtDateTime(r.latest_received_at) }) : ''))
             )
           ),
           h('div', { class: stockClass }, (r.stock !== null && r.stock !== undefined ? r.stock : '—') + ' ' + (it.unit || ''))
@@ -3211,8 +3238,15 @@
         title: I18N.t('{name} · 库存 {n} {unit}', { name: it.name || I18N.t('商品'), n: r.stock !== null && r.stock !== undefined ? r.stock : '—', unit: it.unit || '' })
       });
       sheet.body.appendChild(window.UI.loadingView(I18N.t('加载批次…')));
-      API.itemBatches(r.item.id).then(function (batches) {
-        batches = batches || [];
+      function loadBatches() {
+        return API.itemBatches(r.item.id).then(function (batches) {
+        batches = (batches || []).slice().sort(function (a, b) {
+          if (expiryEnabled(it)) {
+            var dateOrder = (b.expiry_date || '').localeCompare(a.expiry_date || '');
+            if (dateOrder) { return dateOrder; }
+          }
+          return (b.received_at || '').localeCompare(a.received_at || '') || b.id - a.id;
+        });
         sheet.body.innerHTML = '';
         if (!batches.length) {
           sheet.body.appendChild(window.UI.emptyView(I18N.t('暂无批次')));
@@ -3221,26 +3255,50 @@
         batches.forEach(function (b) {
           var d = b.days_to_expiry;
           var daysEl = h('span', { class: 'batch-days' + (d !== null && d !== undefined && d <= 0 ? ' bad' : (d !== null && d !== undefined && d <= 3 ? ' soon' : '')) });
-          if (d === null || d === undefined) { daysEl.textContent = '—'; }
+          if (!b.expiry_date || d === null || d === undefined) { daysEl.textContent = I18N.t('待补效期'); }
           else if (d < 0) { daysEl.textContent = I18N.t('过期 {n} 天', { n: -d }); }
           else if (d === 0) { daysEl.textContent = I18N.t('今天到期'); }
           else { daysEl.textContent = I18N.t('还有 {n} 天', { n: d }); }
           var row = h('div', { class: 'batch-row' },
             h('div', { class: 'batch-info' },
-              h('div', { class: 'batch-exp' }, I18N.t('效期 {date}', { date: b.expiry_date || '—' })),
+              h('div', { class: 'batch-exp' }, expiryEnabled(it) ? expiryLabel(it, b.expiry_date) : I18N.t('入库 {date}', { date: fmtDateTime(b.received_at) })),
               h('div', { class: 'batch-sub' }, (SOURCE_LABEL[b.source] || b.source || '') + (b.received_at ? ' · ' + I18N.t('入库 {date}', { date: fmtDateShort(b.received_at) }) : ''))
             ),
             h('div', { class: 'batch-right' },
               h('div', { class: 'batch-qty' }, b.qty + ' ' + (it.unit || '')),
-              daysEl
+              expiryEnabled(it) ? daysEl : null
             )
           );
+          if (expiryEnabled(it) && !b.expiry_date && b.qty > 0 && ['admin', 'manager'].indexOf((API.store.getUser() || {}).role) >= 0) {
+            var dateInput = h('input', { type: 'date', class: 'input', required: 'required', 'aria-label': I18N.t('补填效期') });
+            var fillButton = h('button', { class: 'btn btn-primary btn-sm', type: 'submit' }, I18N.t('保存效期'));
+            var fillForm = h('form', { class: 'batch-expiry-fill' }, dateInput, fillButton);
+            fillForm.addEventListener('submit', function (event) {
+              event.preventDefault();
+              if (!dateInput.value) { return; }
+              fillButton.disabled = true;
+              API.patch('/batches/' + b.id + '/expiry', { expiry_date: dateInput.value }).then(function () {
+                window.UI.toast(I18N.t('效期已补填'), 'success');
+                return API.stock().then(function (data) {
+                  rows = data || [];
+                  applyFilters();
+                  return loadBatches();
+                });
+              }).catch(function (err) {
+                fillButton.disabled = false;
+                if (!(err && err.silent)) { window.UI.toast(err.message || I18N.t('保存失败'), 'error'); }
+              });
+            });
+            row.appendChild(fillForm);
+          }
           sheet.body.appendChild(row);
         });
       }).catch(function (err) {
         sheet.body.innerHTML = '';
         sheet.body.appendChild(window.UI.errorView((err && err.message) || I18N.t('批次加载失败')));
       });
+      }
+      loadBatches();
     }
 
     return API.stock().then(function (data) {
@@ -3859,8 +3917,8 @@
         });
       } search.addEventListener('input', drawStock); drawStock();
       function batch(row) { return h('article', { class: 'owner-record' }, h('div', { class: 'owner-row' }, h('h3', {}, row.item_name), h('strong', {}, qty(row.qty, row.unit))), note(I18N.t('批次 #{id} · 到期 {date}', { id: row.batch_id, date: row.expiry_date || '—' }))); }
-      section('owner-expired', '已过期批次', data.expiry && data.expiry.expired, batch, '暂无已过期批次');
-      section('owner-upcoming', '3天内到期批次', data.expiry && data.expiry.upcoming, batch, '暂无3天内到期批次');
+      section('owner-expired', '已过期批次', data.expiry && (data.expiry.expired || []).filter(function (r) { return expiryEnabled(r) && !!r.expiry_date; }), batch, '暂无已过期批次');
+      section('owner-upcoming', '3天内到期批次', data.expiry && (data.expiry.upcoming || []).filter(function (r) { return expiryEnabled(r) && !!r.expiry_date; }), batch, '暂无3天内到期批次');
       var consumption = data.consumption || {};
       var forecasts = section('owner-forecast', '预测补货', consumption.items, function (row) {
         var detail = h('details', { class: 'owner-record' }, h('summary', {}, h('span', {}, row.name), h('span', { class: 'owner-status' }, status(row.status))),
@@ -3886,7 +3944,7 @@
       section('owner-counts', '待确认盘点', data.counts && data.counts.pending, count);
       section('owner-count-history', '最近盘点（最多20条）', data.counts && data.counts.recent, count);
       section('owner-waste', '报损记录', data.waste, function (row) {
-        return h('details', { class: 'owner-record' }, h('summary', {}, h('span', {}, row.item_name + ' · ' + qty(row.qty, row.unit)), h('span', { class: 'owner-status' }, status(row.status))), note((row.reported_by_name || '—') + ' · ' + ownerTime(row.reported_at)), note(wasteReason(row.reason)), row.description ? note(row.description) : null, row.batch_id ? note(I18N.t('批次 #{id} · 到期 {date}', { id: row.batch_id, date: row.batch_expiry_date || '—' })) : null, row.confirmed_at ? note(I18N.t('确认时间：{time}', { time: ownerTime(row.confirmed_at) })) : null);
+        return h('details', { class: 'owner-record' }, h('summary', {}, h('span', {}, row.item_name + ' · ' + qty(row.qty, row.unit)), h('span', { class: 'owner-status' }, status(row.status))), note((row.reported_by_name || '—') + ' · ' + ownerTime(row.reported_at)), note(wasteReason(row.reason)), row.description ? note(row.description) : null, row.batch_id ? note(expiryEnabled(row) ? I18N.t('批次 #{id} · {expiry}', { id: row.batch_id, expiry: expiryLabel(row, row.batch_expiry_date) }) : I18N.t('批次 #{id}', { id: row.batch_id })) : null, row.confirmed_at ? note(I18N.t('确认时间：{time}', { time: ownerTime(row.confirmed_at) })) : null);
       });
       section('owner-purchases', '采购记录', data.purchases, function (row) {
         var detail = h('details', { class: 'owner-record' }, h('summary', {}, h('span', {}, I18N.t('采购单 #{id}', { id: row.id })), h('span', { class: 'owner-status' }, status(row.status))), note((row.created_by_name || '—') + ' · ' + ownerTime(row.created_at)));

@@ -22,6 +22,7 @@ def _serialize(db: Session, p: Purchase) -> PurchaseOut:
                 id=pi.id,
                 item_id=pi.item_id,
                 item_name=item.name if item else "?",
+                expiry_enabled=item.expiry_enabled if item else True,
                 unit=item.unit if item else "",
                 qty=pi.qty,
             )
@@ -105,11 +106,13 @@ def receive_purchase(
             db.rollback()
             raise HTTPException(status_code=409, detail="该采购单已处理")
         for pi in purchase.items:
+            if pi.item.expiry_enabled and provided[pi.id] is None:
+                raise HTTPException(status_code=400, detail="启用效期的库存品必须填写效期")
             batch = Batch(
                 item_id=pi.item_id,
                 qty=pi.qty,
                 initial_qty=pi.qty,
-                expiry_date=provided[pi.id],
+                expiry_date=provided[pi.id] if pi.item.expiry_enabled else None,
                 source="purchase",
                 note=f"采购单 #{purchase.id}",
             )

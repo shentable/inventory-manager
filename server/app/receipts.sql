@@ -1,6 +1,6 @@
 -- Existing direct receipt batches are discovered from their immutable opening movement.
 SELECT json_object(
-  'id', b.id, 'item_id', b.item_id, 'item_name', i.name, 'unit', i.unit,
+  'id', b.id, 'item_id', b.item_id, 'item_name', i.name, 'unit', i.unit, 'expiry_enabled', json(CASE WHEN i.expiry_enabled THEN 'true' ELSE 'false' END),
   'original_qty', m.delta / 10.0,
   'qty', (m.delta + coalesce((SELECT sum(new_qty-old_qty) FROM stock_receipt_corrections WHERE batch_id=b.id),0)) / 10.0,
   'remaining_qty', b.qty / 10.0, 'expiry_date', b.expiry_date, 'note', b.note,

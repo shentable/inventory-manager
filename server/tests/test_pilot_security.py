@@ -7,7 +7,7 @@ def test_health_is_public(client):
     body = response.json()
     assert body["status"] == "ok"
     assert body["api_version"] == "1"
-    assert body["db_schema"] == "20261102_11"
+    assert body["db_schema"] == "20261102_12"
     assert body["backend_kind"] == "python"
     assert set(body) == {
         "status", "api_version", "db_schema", "store_id", "backend_kind", "app_version"

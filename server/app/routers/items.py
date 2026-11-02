@@ -43,6 +43,7 @@ def _serialize(db: Session, item: Item) -> ItemOut:
         name=item.name,
         category=item.category,
         unit=item.unit,
+        expiry_enabled=item.expiry_enabled,
         shelf_life_days=item.shelf_life_days,
         min_stock=item.min_stock,
         daily_count_enabled=item.daily_count_enabled,
@@ -133,7 +134,8 @@ def item_batches(
             received_at=b.received_at,
             source=b.source,
             note=b.note,
-            days_to_expiry=days_to_expiry(b.expiry_date),
+            expiry_enabled=item.expiry_enabled,
+            days_to_expiry=days_to_expiry(b.expiry_date) if item.expiry_enabled else None,
         )
         for b in batches
     ]

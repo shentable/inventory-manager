@@ -351,7 +351,7 @@ def confirm_pair(
                 item = db.get(Item, row["item_id"])
                 batch = Batch(
                     item_id=row["item_id"], qty=delta, initial_qty=delta,
-                    expiry_date=(today() + timedelta(days=item.shelf_life_days)).isoformat(),
+                    expiry_date=(today() + timedelta(days=item.shelf_life_days)).isoformat() if item.expiry_enabled else None,
                     source="adjust", note="双人盘点盘盈",
                 )
                 db.add(batch)

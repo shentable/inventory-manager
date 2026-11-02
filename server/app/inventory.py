@@ -17,8 +17,10 @@ def today() -> date:
     return datetime.now(STORE_TIMEZONE).date()
 
 
-def days_to_expiry(expiry_date: str, ref: date | None = None) -> int:
+def days_to_expiry(expiry_date: str | None, ref: date | None = None) -> int | None:
     """剩余天数 = expiry_date - 今天（可为负数=已过期）。"""
+    if expiry_date is None:
+        return None
     return (date.fromisoformat(expiry_date) - (ref or today())).days
 
 
@@ -33,11 +35,13 @@ def item_stock(db: Session, item_id: int) -> float:
 
 def positive_batches(db: Session, item_id: int) -> list[models.Batch]:
     """qty>0 的批次，按效期升序（FEFO 顺序）。"""
+    item = db.get(models.Item, item_id)
+    ordering = (models.Batch.expiry_date.is_not(None), models.Batch.expiry_date, models.Batch.received_at, models.Batch.id) if item.expiry_enabled else (models.Batch.received_at, models.Batch.id)
     return list(
         db.scalars(
             select(models.Batch)
             .where(models.Batch.item_id == item_id, models.Batch.qty > 0)
-            .order_by(models.Batch.expiry_date, models.Batch.id)
+            .order_by(*ordering)
         )
     )
 
